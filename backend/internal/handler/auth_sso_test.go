@@ -158,8 +158,11 @@ func TestSSOPasswordHandlerKeepsProviderCookiesOnServer(t *testing.T) {
 	require.NotContains(t, w.Body.String(), "provider-secret")
 	require.NotContains(t, w.Body.String(), "access_token")
 	require.NotEmpty(t, store.session.Cookies)
-	challenge := data["challenge"].(map[string]any)
-	require.Len(t, challenge["token"].(string), 64)
+	challenge, ok := data["challenge"].(map[string]any)
+	require.True(t, ok)
+	challengeToken, ok := challenge["token"].(string)
+	require.True(t, ok)
+	require.Len(t, challengeToken, 64)
 	// Every handler rejects malformed input before contacting the provider.
 	for _, fn := range []func(*gin.Context){h.SSOPasswordLogin, h.SSOMFA, h.SSOSendCode, h.SSORegister} {
 		c, w = ssoRequest("/api/v1/auth/sso/test", `{}`)
