@@ -28,9 +28,14 @@ func RegisterAuthRoutes(
 	// 公开接口
 	auth := v1.Group("/auth")
 	auth.Use(servermiddleware.BackendModeAuthGuard(settingService))
+	auth.Use(servermiddleware.SSOAuthGuard(settingService))
 	// 认证事件（登录/注册/2FA/token 刷新失败）入审计
 	auth.Use(gin.HandlerFunc(auditLog))
 	{
+		auth.POST("/sso/password-login", rateLimiter.LimitWithOptions("sso-login", 20, time.Minute, middleware.RateLimitOptions{FailureMode: middleware.RateLimitFailClose}), h.Auth.SSOPasswordLogin)
+		auth.POST("/sso/mfa", rateLimiter.LimitWithOptions("sso-mfa", 20, time.Minute, middleware.RateLimitOptions{FailureMode: middleware.RateLimitFailClose}), h.Auth.SSOMFA)
+		auth.POST("/sso/register/send-code", rateLimiter.LimitWithOptions("sso-send-code", 5, time.Minute, middleware.RateLimitOptions{FailureMode: middleware.RateLimitFailClose}), h.Auth.SSOSendCode)
+		auth.POST("/sso/register", rateLimiter.LimitWithOptions("sso-register", 5, time.Minute, middleware.RateLimitOptions{FailureMode: middleware.RateLimitFailClose}), h.Auth.SSORegister)
 		// 注册/登录/2FA/验证码发送均属于高风险入口，增加服务端兜底限流（Redis 故障时 fail-close）
 		auth.POST("/register", rateLimiter.LimitWithOptions("auth-register", 5, time.Minute, middleware.RateLimitOptions{
 			FailureMode: middleware.RateLimitFailClose,
@@ -250,6 +255,7 @@ func RegisterAuthRoutes(
 	// 需要认证的当前用户信息
 	authenticated := v1.Group("")
 	authenticated.Use(gin.HandlerFunc(jwtAuth))
+	authenticated.Use(servermiddleware.SSOAuthGuard(settingService))
 	authenticated.Use(servermiddleware.BackendModeUserGuard(settingService))
 	// 面板全局按用户限流
 	authenticated.Use(panelRateLimiter.Global())

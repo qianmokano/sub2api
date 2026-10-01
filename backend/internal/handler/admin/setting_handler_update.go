@@ -22,6 +22,11 @@ import (
 
 // UpdateSettingsRequest 更新设置请求
 type UpdateSettingsRequest struct {
+	SSOEnabled             *bool   `json:"sso_enabled"`
+	SSOOnlyEnabled         *bool   `json:"sso_only_enabled"`
+	SSORegistrationEnabled *bool   `json:"sso_registration_enabled"`
+	SSOOrganization        *string `json:"sso_organization"`
+	SSOApplication         *string `json:"sso_application"`
 	// 注册设置
 	RegistrationEnabled                 bool                         `json:"registration_enabled"`
 	EmailVerifyEnabled                  bool                         `json:"email_verify_enabled"`
@@ -509,6 +514,23 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
+	}
+	ssoEnabled, ssoOnlyEnabled, ssoRegistrationEnabled := previousSettings.SSOEnabled, previousSettings.SSOOnlyEnabled, previousSettings.SSORegistrationEnabled
+	ssoOrganization, ssoApplication := previousSettings.SSOOrganization, previousSettings.SSOApplication
+	if req.SSOEnabled != nil {
+		ssoEnabled = *req.SSOEnabled
+	}
+	if req.SSOOnlyEnabled != nil {
+		ssoOnlyEnabled = *req.SSOOnlyEnabled
+	}
+	if req.SSORegistrationEnabled != nil {
+		ssoRegistrationEnabled = *req.SSORegistrationEnabled
+	}
+	if req.SSOOrganization != nil {
+		ssoOrganization = strings.TrimSpace(*req.SSOOrganization)
+	}
+	if req.SSOApplication != nil {
+		ssoApplication = strings.TrimSpace(*req.SSOApplication)
 	}
 
 	// 两个安全开关的请求字段为指针：省略字段=保持现值，避免旧客户端/脚本
@@ -1518,6 +1540,8 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 	}
 
 	settings := &service.SystemSettings{
+		SSOEnabled: ssoEnabled, SSOOnlyEnabled: ssoOnlyEnabled, SSORegistrationEnabled: ssoRegistrationEnabled,
+		SSOOrganization: ssoOrganization, SSOApplication: ssoApplication,
 		// 系统全局 platform quota 默认值（整体替换语义）
 		DefaultPlatformQuotas:       req.DefaultPlatformQuotas,
 		AccountSchedulingThresholds: req.AccountSchedulingThresholds,
@@ -2097,6 +2121,13 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		},
 		ForceEmailOnThirdPartySignup: boolValueOrDefault(req.ForceEmailOnThirdPartySignup, previousAuthSourceDefaults.ForceEmailOnThirdPartySignup),
 	}
+	// Cross-field SSO validation must use retained OIDC values for partial saves.
+	if _, absent := omitted[service.SettingKeyOIDCConnectEnabled]; absent {
+		settings.OIDCConnectEnabled = previousSettings.OIDCConnectEnabled
+	}
+	if _, absent := omitted[service.SettingKeyOIDCConnectIssuerURL]; absent {
+		settings.OIDCConnectIssuerURL = previousSettings.OIDCConnectIssuerURL
+	}
 	if err := h.settingService.UpdateSettingsWithAuthSourceDefaultsOmitting(c.Request.Context(), settings, authSourceDefaults, omitted); err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -2184,6 +2215,9 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 	passkeyConfigured, passkeyRPID, passkeyRPOrigins := h.settingService.PasskeyConfiguration()
 
 	payload := dto.SystemSettings{
+		SSOEnabled: updatedSettings.SSOEnabled, SSOOnlyEnabled: updatedSettings.SSOOnlyEnabled,
+		SSORegistrationEnabled: updatedSettings.SSORegistrationEnabled,
+		SSOOrganization:        updatedSettings.SSOOrganization, SSOApplication: updatedSettings.SSOApplication,
 		RegistrationEnabled:                                    updatedSettings.RegistrationEnabled,
 		EmailVerifyEnabled:                                     updatedSettings.EmailVerifyEnabled,
 		RegistrationEmailSuffixWhitelist:                       updatedSettings.RegistrationEmailSuffixWhitelist,

@@ -27,6 +27,7 @@ type AuthHandler struct {
 	redeemService        *service.RedeemService
 	totpService          *service.TotpService
 	userAttributeService *service.UserAttributeService
+	ssoService           *service.SSOService
 
 	dingTalkClientInstance *DingTalkClient
 	dingTalkClientMu       sync.Mutex
@@ -249,12 +250,15 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 
-	token, user, err := h.authService.Login(c.Request.Context(), req.Email, req.Password)
+	user, err := h.authService.AuthenticatePassword(c.Request.Context(), req.Email, req.Password)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
 	}
-	_ = token // token 由 authService.Login 返回但此处由 respondWithTokenPair 重新生成
+	if err := h.checkLocalLoginPolicy(c.Request.Context(), user, false); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
 
 	if err := h.ensureBackendModeAllowsUser(c.Request.Context(), user); err != nil {
 		response.ErrorFrom(c, err)
@@ -346,6 +350,10 @@ func (h *AuthHandler) Login2FA(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
+	if err := h.checkLocalLoginPolicy(c.Request.Context(), user, session.AuthenticationSource == "sso"); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
 
 	if err := h.ensureBackendModeAllowsUser(c.Request.Context(), user); err != nil {
 		response.ErrorFrom(c, err)
@@ -410,7 +418,11 @@ func (h *AuthHandler) Login2FA(c *gin.Context) {
 	}
 
 	// Delete the login session (only after all checks pass)
-	_ = h.totpService.DeleteLoginSession(c.Request.Context(), req.TempToken)
+	consumed, err := h.totpService.ConsumeLoginSession(c.Request.Context(), req.TempToken)
+	if err != nil || !consumed {
+		response.BadRequest(c, "Invalid or expired 2FA session")
+		return
+	}
 
 	if session.PendingOAuthBind == nil {
 		h.authService.RecordSuccessfulLogin(c.Request.Context(), user.ID)

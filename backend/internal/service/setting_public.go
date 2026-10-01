@@ -218,6 +218,10 @@ func (s *SettingService) GetPublicSettings(ctx context.Context) (*PublicSettings
 		SettingBalancePayDisabled,
 		SettingKeyOIDCConnectEnabled,
 		SettingKeyOIDCConnectProviderName,
+		SettingKeyOIDCConnectIssuerURL,
+		SettingKeySSOEnabled,
+		SettingKeySSOOnlyEnabled,
+		SettingKeySSORegistrationEnabled,
 		SettingKeyGitHubOAuthEnabled,
 		SettingKeyGitHubOAuthClientID,
 		SettingKeyGitHubOAuthClientSecret,
@@ -300,6 +304,10 @@ func (s *SettingService) GetPublicSettings(ctx context.Context) (*PublicSettings
 	}
 
 	return &PublicSettings{
+		SSOEnabled:                          settings[SettingKeySSOEnabled] == "true",
+		SSOOnlyEnabled:                      settings[SettingKeySSOOnlyEnabled] == "true",
+		SSORegistrationEnabled:              settings[SettingKeySSORegistrationEnabled] == "true",
+		SSOAccountURL:                       s.ssoAccountURL(settings),
 		RegistrationEnabled:                 settings[SettingKeyRegistrationEnabled] == "true",
 		EmailVerifyEnabled:                  emailVerifyEnabled,
 		ForceEmailOnThirdPartySignup:        settings[SettingKeyForceEmailOnThirdPartySignup] == "true",
@@ -560,6 +568,10 @@ func (s *SettingService) IsUserErrorViewAllowed(ctx context.Context) bool {
 // A unit test diffs this struct's JSON keys against dto.PublicSettings to catch
 // drift automatically (see setting_service_injection_test.go).
 type PublicSettingsInjectionPayload struct {
+	SSOEnabled                          bool                     `json:"sso_enabled"`
+	SSOOnlyEnabled                      bool                     `json:"sso_only_enabled"`
+	SSORegistrationEnabled              bool                     `json:"sso_registration_enabled"`
+	SSOAccountURL                       string                   `json:"sso_account_url"`
 	RegistrationEnabled                 bool                     `json:"registration_enabled"`
 	EmailVerifyEnabled                  bool                     `json:"email_verify_enabled"`
 	RegistrationEmailSuffixWhitelist    []string                 `json:"registration_email_suffix_whitelist"`
@@ -654,6 +666,8 @@ func (s *SettingService) GetPublicSettingsForInjection(ctx context.Context) (any
 	}
 
 	return &PublicSettingsInjectionPayload{
+		SSOEnabled: settings.SSOEnabled, SSOOnlyEnabled: settings.SSOOnlyEnabled,
+		SSORegistrationEnabled: settings.SSORegistrationEnabled, SSOAccountURL: settings.SSOAccountURL,
 		RegistrationEnabled:                 settings.RegistrationEnabled,
 		EmailVerifyEnabled:                  settings.EmailVerifyEnabled,
 		RegistrationEmailSuffixWhitelist:    settings.RegistrationEmailSuffixWhitelist,

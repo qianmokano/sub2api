@@ -3556,6 +3556,12 @@ func (s *oauthPendingFlowTotpCacheStub) DeleteLoginSession(_ context.Context, te
 	return nil
 }
 
+func (s *oauthPendingFlowTotpCacheStub) ConsumeLoginSession(_ context.Context, tempToken string) (bool, error) {
+	_, exists := s.loginSessions[tempToken]
+	delete(s.loginSessions, tempToken)
+	return exists, nil
+}
+
 func (s *oauthPendingFlowTotpCacheStub) IncrementVerifyAttempts(_ context.Context, userID int64) (int, error) {
 	if s.verifyAttempts == nil {
 		s.verifyAttempts = map[int64]int{}

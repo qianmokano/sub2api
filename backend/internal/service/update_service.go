@@ -25,6 +25,7 @@ import (
 var (
 	ErrNoUpdateAvailable         = infraerrors.Conflict("ALREADY_UP_TO_DATE", "no update available; current version is latest")
 	ErrRollbackVersionNotAllowed = infraerrors.BadRequest("ROLLBACK_VERSION_NOT_ALLOWED", "version is not in the allowed rollback list")
+	ErrForkUpdateManaged         = infraerrors.Forbidden("FORK_UPDATE_MANAGED", "Upgrade this fork with its published container image and deployment backup procedure")
 )
 
 const (
@@ -131,6 +132,10 @@ type GitHubAsset struct {
 
 // CheckUpdate checks for available updates
 func (s *UpdateService) CheckUpdate(ctx context.Context, force bool) (*UpdateInfo, error) {
+	if s.isManagedFork() {
+		return &UpdateInfo{CurrentVersion: s.currentVersion, LatestVersion: s.currentVersion, BuildType: "kano-container",
+			Warning: "kano fork updates are published through https://github.com/qianmokano/sub2api/releases"}, nil
+	}
 	// Try cache first
 	if !force {
 		if cached, err := s.getFromCache(ctx); err == nil && cached != nil {
@@ -163,6 +168,9 @@ func (s *UpdateService) CheckUpdate(ctx context.Context, force bool) (*UpdateInf
 // PerformUpdate downloads and applies the update
 // Uses atomic file replacement pattern for safe in-place updates
 func (s *UpdateService) PerformUpdate(ctx context.Context) error {
+	if s.isManagedFork() {
+		return ErrForkUpdateManaged
+	}
 	info, err := s.CheckUpdate(ctx, true)
 	if err != nil {
 		return err
@@ -281,6 +289,9 @@ func (s *UpdateService) applyReleaseAssets(ctx context.Context, releaseAssets []
 
 // Rollback restores the previous version
 func (s *UpdateService) Rollback() error {
+	if s.isManagedFork() {
+		return ErrForkUpdateManaged
+	}
 	exePath, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("failed to get executable path: %w", err)
@@ -307,6 +318,9 @@ func (s *UpdateService) Rollback() error {
 // strictly older than the current version (the current version itself is excluded),
 // newest first. Draft and prerelease entries are skipped.
 func (s *UpdateService) ListRollbackVersions(ctx context.Context) ([]RollbackVersion, error) {
+	if s.isManagedFork() {
+		return []RollbackVersion{}, nil
+	}
 	releases, err := s.fetchRollbackCandidates(ctx)
 	if err != nil {
 		return nil, err
@@ -327,6 +341,9 @@ func (s *UpdateService) ListRollbackVersions(ctx context.Context) ([]RollbackVer
 // The target must be one of the versions returned by ListRollbackVersions;
 // anything else (including the current version) is rejected.
 func (s *UpdateService) RollbackToVersion(ctx context.Context, version string) error {
+	if s.isManagedFork() {
+		return ErrForkUpdateManaged
+	}
 	target := strings.TrimPrefix(strings.TrimSpace(version), "v")
 	if target == "" {
 		return ErrRollbackVersionNotAllowed
@@ -358,6 +375,10 @@ func (s *UpdateService) RollbackToVersion(ctx context.Context, version string) e
 	}
 
 	return s.applyReleaseAssets(ctx, assets)
+}
+
+func (s *UpdateService) isManagedFork() bool {
+	return s.buildType == "kano-container" || strings.Contains(s.currentVersion, "-kano.")
 }
 
 // fetchRollbackCandidates fetches recent releases and keeps the newest

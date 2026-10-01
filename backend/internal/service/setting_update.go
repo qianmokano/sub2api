@@ -99,6 +99,9 @@ func (s *SettingService) refreshCachedSettingsAfterWrite(ctx context.Context, se
 }
 
 func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, settings *SystemSettings) (map[string]string, error) {
+	if err := validateSSOSettings(settings); err != nil {
+		return nil, err
+	}
 	if err := s.validateDefaultSubscriptionGroups(ctx, settings.DefaultSubscriptions); err != nil {
 		return nil, err
 	}
@@ -160,6 +163,11 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	}
 
 	updates := make(map[string]string)
+	updates[SettingKeySSOEnabled] = strconv.FormatBool(settings.SSOEnabled)
+	updates[SettingKeySSOOnlyEnabled] = strconv.FormatBool(settings.SSOOnlyEnabled)
+	updates[SettingKeySSORegistrationEnabled] = strconv.FormatBool(settings.SSORegistrationEnabled)
+	updates[SettingKeySSOOrganization] = settings.SSOOrganization
+	updates[SettingKeySSOApplication] = settings.SSOApplication
 
 	// 注册设置
 	updates[SettingKeyRegistrationEnabled] = strconv.FormatBool(settings.RegistrationEnabled)
