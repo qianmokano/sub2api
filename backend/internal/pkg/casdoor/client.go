@@ -95,7 +95,7 @@ func (c *Client) request(ctx context.Context, client *http.Client, method, path,
 	if err != nil {
 		return nil, ErrUnavailable
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, ErrUnavailable
 	}
