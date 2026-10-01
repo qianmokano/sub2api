@@ -370,6 +370,7 @@ type PublicSettings struct {
 	SSOOnlyEnabled                      bool                     `json:"sso_only_enabled"`
 	SSORegistrationEnabled              bool                     `json:"sso_registration_enabled"`
 	SSOAccountURL                       string                   `json:"sso_account_url"`
+	SSOPasswordResetURL                 string                   `json:"sso_password_reset_url"`
 	RegistrationEnabled                 bool                     `json:"registration_enabled"`
 	EmailVerifyEnabled                  bool                     `json:"email_verify_enabled"`
 	ForceEmailOnThirdPartySignup        bool                     `json:"force_email_on_third_party_signup"`

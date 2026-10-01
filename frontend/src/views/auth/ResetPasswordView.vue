@@ -255,7 +255,7 @@ const isInvalidLink = computed(() => !email.value || !token.value)
 onMounted(async () => {
   const settings = await getPublicSettings().catch(() => null)
   if (settings?.sso_only_enabled && settings.sso_account_url) {
-    window.location.assign(settings.sso_account_url)
+    window.location.assign(settings.sso_password_reset_url || settings.sso_account_url)
     return
   }
   // Get email and token from URL query parameters

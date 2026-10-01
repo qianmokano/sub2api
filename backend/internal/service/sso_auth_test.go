@@ -196,7 +196,17 @@ func TestSSOSettingsDependenciesAndFailClosed(t *testing.T) {
 	require.Error(t, validateSSOSettings(&SystemSettings{SSORegistrationEnabled: true}))
 	require.NoError(t, validateSSOSettings(&SystemSettings{}))
 	require.NoError(t, validateSSOSettings(&SystemSettings{SSOEnabled: true, OIDCConnectEnabled: true, OIDCConnectIssuerURL: "https://auth.example"}))
-	require.Equal(t, "https://auth.example/account", svc.settings.ssoAccountURL(repo.values))
+	require.Equal(t, "https://auth.example/login/kano", svc.settings.ssoAccountURL(repo.values))
+	require.Equal(t, "https://auth.example/forget/sub2api", svc.settings.ssoPasswordResetURL(repo.values))
+	repo.values[SettingKeySSOOrganization] = "another-org"
+	repo.values[SettingKeySSOApplication] = "admin/another-app"
+	require.Equal(t, "https://auth.example/login/another-org", svc.settings.ssoAccountURL(repo.values))
+	require.Equal(t, "https://auth.example/forget/another-app", svc.settings.ssoPasswordResetURL(repo.values))
+	for _, issuer := range []string{"javascript:invalid", "https://auth.example?secret=hidden", "https://auth.example/path", "https://user:pass@auth.example", "https://auth.example#hidden"} {
+		require.Empty(t, svc.settings.ssoAccountURL(map[string]string{SettingKeyOIDCConnectIssuerURL: issuer}))
+		require.Empty(t, svc.settings.ssoPasswordResetURL(map[string]string{SettingKeyOIDCConnectIssuerURL: issuer}))
+	}
+	require.Empty(t, svc.settings.ssoAccountURL(map[string]string{SettingKeyOIDCConnectIssuerURL: "https://auth.example", SettingKeySSOApplication: "malformed"}))
 	require.Empty(t, svc.settings.ssoAccountURL(map[string]string{SettingKeyOIDCConnectIssuerURL: "javascript:invalid"}))
 	repo.err = errors.New("db offline")
 	_, err = svc.settings.GetSSOSettings(context.Background())

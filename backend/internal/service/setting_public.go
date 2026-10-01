@@ -222,6 +222,8 @@ func (s *SettingService) GetPublicSettings(ctx context.Context) (*PublicSettings
 		SettingKeySSOEnabled,
 		SettingKeySSOOnlyEnabled,
 		SettingKeySSORegistrationEnabled,
+		SettingKeySSOOrganization,
+		SettingKeySSOApplication,
 		SettingKeyGitHubOAuthEnabled,
 		SettingKeyGitHubOAuthClientID,
 		SettingKeyGitHubOAuthClientSecret,
@@ -308,6 +310,7 @@ func (s *SettingService) GetPublicSettings(ctx context.Context) (*PublicSettings
 		SSOOnlyEnabled:                      settings[SettingKeySSOOnlyEnabled] == "true",
 		SSORegistrationEnabled:              settings[SettingKeySSORegistrationEnabled] == "true",
 		SSOAccountURL:                       s.ssoAccountURL(settings),
+		SSOPasswordResetURL:                 s.ssoPasswordResetURL(settings),
 		RegistrationEnabled:                 settings[SettingKeyRegistrationEnabled] == "true",
 		EmailVerifyEnabled:                  emailVerifyEnabled,
 		ForceEmailOnThirdPartySignup:        settings[SettingKeyForceEmailOnThirdPartySignup] == "true",
@@ -572,6 +575,7 @@ type PublicSettingsInjectionPayload struct {
 	SSOOnlyEnabled                      bool                     `json:"sso_only_enabled"`
 	SSORegistrationEnabled              bool                     `json:"sso_registration_enabled"`
 	SSOAccountURL                       string                   `json:"sso_account_url"`
+	SSOPasswordResetURL                 string                   `json:"sso_password_reset_url"`
 	RegistrationEnabled                 bool                     `json:"registration_enabled"`
 	EmailVerifyEnabled                  bool                     `json:"email_verify_enabled"`
 	RegistrationEmailSuffixWhitelist    []string                 `json:"registration_email_suffix_whitelist"`
@@ -668,6 +672,7 @@ func (s *SettingService) GetPublicSettingsForInjection(ctx context.Context) (any
 	return &PublicSettingsInjectionPayload{
 		SSOEnabled: settings.SSOEnabled, SSOOnlyEnabled: settings.SSOOnlyEnabled,
 		SSORegistrationEnabled: settings.SSORegistrationEnabled, SSOAccountURL: settings.SSOAccountURL,
+		SSOPasswordResetURL:                 settings.SSOPasswordResetURL,
 		RegistrationEnabled:                 settings.RegistrationEnabled,
 		EmailVerifyEnabled:                  settings.EmailVerifyEnabled,
 		RegistrationEmailSuffixWhitelist:    settings.RegistrationEmailSuffixWhitelist,

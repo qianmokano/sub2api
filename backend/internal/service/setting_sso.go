@@ -85,13 +85,29 @@ func validateSSOConfig(oidcEnabled bool, cfg casdoor.Config) error {
 }
 
 func (s *SettingService) ssoAccountURL(settings map[string]string) string {
+	account, _ := s.ssoManagementURLs(settings)
+	return account
+}
+
+func (s *SettingService) ssoPasswordResetURL(settings map[string]string) string {
+	_, reset := s.ssoManagementURLs(settings)
+	return reset
+}
+
+func (s *SettingService) ssoManagementURLs(settings map[string]string) (string, string) {
 	issuer := settings[SettingKeyOIDCConnectIssuerURL]
 	if issuer == "" && s.cfg != nil {
 		issuer = s.cfg.OIDC.IssuerURL
 	}
 	u, err := url.Parse(issuer)
-	if err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil {
-		return ""
+	if err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || strings.Trim(u.Path, "/") != "" {
+		return "", ""
 	}
-	return strings.TrimRight(issuer, "/") + "/account"
+	organization := firstNonEmpty(settings[SettingKeySSOOrganization], "kano")
+	parts := strings.Split(firstNonEmpty(settings[SettingKeySSOApplication], "admin/sub2api"), "/")
+	if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" || strings.TrimSpace(parts[1]) == "" {
+		return "", ""
+	}
+	base := strings.TrimRight(issuer, "/")
+	return base + "/login/" + url.PathEscape(organization), base + "/forget/" + url.PathEscape(parts[1])
 }

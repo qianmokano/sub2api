@@ -18,6 +18,8 @@
 
 页内登录不在浏览器建立 Casdoor 会话，首次进入另一个站点可能需要重新输入同一凭据。OIDC 跳转入口保留为兜底。
 
+账户管理使用 `/login/kano` 建立正确组织的 Casdoor 浏览器会话，登录后进入通行证管理界面；找回密码使用 `/forget/sub2api`。不要将新浏览器直接送到 `/account`：无会话时该地址会落到 built-in 默认组织，无法认证 kano 普通用户。公开设置中的这两个地址按实际组织和应用生成。
+
 后端新增 `/api/v1/auth/sso/password-login`、`/sso/mfa`、`/sso/register/send-code`、`/sso/register`。密码仅用于当次 HTTPS 代理，不落库、不记录日志。Casdoor Cookie 保存在 Redis，浏览器仅收到随机 MFA 挑战与可用验证方式；挑战 10 分钟有效、最多 10 次尝试，验证期间持有短期租约，成功后原子消费。Redis 故障拒绝认证。
 
 身份键为 `(oidc, issuer, Casdoor user.Id)`，沿用原 OIDC `sub`。已绑定账号继续使用原业务数据；新身份要求已验证邮箱，不按相同邮箱自动接管旧账号。开户、身份绑定、初始余额和默认订阅在同一事务提交，重试不重复发放。Casdoor 注册成功但业务建号失败时，使用同一凭据重试登录；身份冲突需要管理员核对。平台额度快照保持上游 best-effort 行为。
