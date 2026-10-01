@@ -59,7 +59,7 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		SettingKeySSOOnlyEnabled:                            "false",
 		SettingKeySSORegistrationEnabled:                    "false",
 		SettingKeySSOOrganization:                           "kano",
-		SettingKeySSOApplication:                            "kano/sub2api",
+		SettingKeySSOApplication:                            "admin/sub2api",
 		SettingKeyRegistrationEnabled:                       "true",
 		SettingKeyEmailVerifyEnabled:                        "false",
 		SettingKeyRegistrationEmailSuffixWhitelist:          "[]",
@@ -382,7 +382,7 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 		SSOOnlyEnabled:                         settings[SettingKeySSOOnlyEnabled] == "true",
 		SSORegistrationEnabled:                 settings[SettingKeySSORegistrationEnabled] == "true",
 		SSOOrganization:                        firstNonEmpty(settings[SettingKeySSOOrganization], "kano"),
-		SSOApplication:                         firstNonEmpty(settings[SettingKeySSOApplication], "kano/sub2api"),
+		SSOApplication:                         firstNonEmpty(settings[SettingKeySSOApplication], "admin/sub2api"),
 	}
 	result.TableDefaultPageSize, result.TablePageSizeOptions = parseTablePreferences(
 		settings[SettingKeyTableDefaultPageSize],

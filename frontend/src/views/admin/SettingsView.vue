@@ -9923,7 +9923,7 @@ const form = reactive<SettingsForm>({
   sso_only_enabled: false,
   sso_registration_enabled: false,
   sso_organization: 'kano',
-  sso_application: 'kano/sub2api',
+  sso_application: 'admin/sub2api',
   oidc_connect_provider_name: "OIDC",
   oidc_connect_client_id: "",
   oidc_connect_client_secret: "",

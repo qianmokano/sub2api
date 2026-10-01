@@ -177,14 +177,17 @@ func TestSSOSettingsDependenciesAndFailClosed(t *testing.T) {
 	svc, _, _, repo := newSSOTestService()
 	policy, err := svc.settings.GetSSOSettings(context.Background())
 	require.NoError(t, err)
-	require.Equal(t, "kano/sub2api", policy.Config.Application)
+	require.Equal(t, "admin/sub2api", policy.Config.Application)
 	require.NoError(t, validateSSOConfig(true, policy.Config))
+	require.NoError(t, validateSSOConfig(true, casdoor.Config{Issuer: "https://auth.example", Organization: "kano", Application: "admin/sub2api"}))
 	for _, cfg := range []casdoor.Config{
 		{Issuer: "http://auth.example", Organization: "kano", Application: "kano/sub2api"},
 		{Issuer: "https://user:pass@auth.example", Organization: "kano", Application: "kano/sub2api"},
 		{Issuer: "https://auth.example/path", Organization: "kano", Application: "kano/sub2api"},
 		{Issuer: "https://auth.example?secret=1", Organization: "kano", Application: "kano/sub2api"},
-		{Issuer: "https://auth.example", Organization: "kano", Application: "other/sub2api"},
+		{Issuer: "https://auth.example", Organization: "kano", Application: "/sub2api"},
+		{Issuer: "https://auth.example", Organization: "kano", Application: "admin/"},
+		{Issuer: "https://auth.example", Organization: "kano", Application: "admin/sub2api/extra"},
 	} {
 		require.Error(t, validateSSOConfig(true, cfg))
 	}
