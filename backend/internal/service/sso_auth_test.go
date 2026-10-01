@@ -177,14 +177,17 @@ func TestSSOSettingsDependenciesAndFailClosed(t *testing.T) {
 	svc, _, _, repo := newSSOTestService()
 	policy, err := svc.settings.GetSSOSettings(context.Background())
 	require.NoError(t, err)
-	require.Equal(t, "kano/sub2api", policy.Config.Application)
+	require.Equal(t, "admin/sub2api", policy.Config.Application)
 	require.NoError(t, validateSSOConfig(true, policy.Config))
+	require.NoError(t, validateSSOConfig(true, casdoor.Config{Issuer: "https://auth.example", Organization: "kano", Application: "admin/sub2api"}))
 	for _, cfg := range []casdoor.Config{
 		{Issuer: "http://auth.example", Organization: "kano", Application: "kano/sub2api"},
 		{Issuer: "https://user:pass@auth.example", Organization: "kano", Application: "kano/sub2api"},
 		{Issuer: "https://auth.example/path", Organization: "kano", Application: "kano/sub2api"},
 		{Issuer: "https://auth.example?secret=1", Organization: "kano", Application: "kano/sub2api"},
-		{Issuer: "https://auth.example", Organization: "kano", Application: "other/sub2api"},
+		{Issuer: "https://auth.example", Organization: "kano", Application: "/sub2api"},
+		{Issuer: "https://auth.example", Organization: "kano", Application: "admin/"},
+		{Issuer: "https://auth.example", Organization: "kano", Application: "admin/sub2api/extra"},
 	} {
 		require.Error(t, validateSSOConfig(true, cfg))
 	}
@@ -193,7 +196,17 @@ func TestSSOSettingsDependenciesAndFailClosed(t *testing.T) {
 	require.Error(t, validateSSOSettings(&SystemSettings{SSORegistrationEnabled: true}))
 	require.NoError(t, validateSSOSettings(&SystemSettings{}))
 	require.NoError(t, validateSSOSettings(&SystemSettings{SSOEnabled: true, OIDCConnectEnabled: true, OIDCConnectIssuerURL: "https://auth.example"}))
-	require.Equal(t, "https://auth.example/account", svc.settings.ssoAccountURL(repo.values))
+	require.Equal(t, "https://auth.example/login/kano", svc.settings.ssoAccountURL(repo.values))
+	require.Equal(t, "https://auth.example/forget/sub2api", svc.settings.ssoPasswordResetURL(repo.values))
+	repo.values[SettingKeySSOOrganization] = "another-org"
+	repo.values[SettingKeySSOApplication] = "admin/another-app"
+	require.Equal(t, "https://auth.example/login/another-org", svc.settings.ssoAccountURL(repo.values))
+	require.Equal(t, "https://auth.example/forget/another-app", svc.settings.ssoPasswordResetURL(repo.values))
+	for _, issuer := range []string{"javascript:invalid", "https://auth.example?secret=hidden", "https://auth.example/path", "https://user:pass@auth.example", "https://auth.example#hidden"} {
+		require.Empty(t, svc.settings.ssoAccountURL(map[string]string{SettingKeyOIDCConnectIssuerURL: issuer}))
+		require.Empty(t, svc.settings.ssoPasswordResetURL(map[string]string{SettingKeyOIDCConnectIssuerURL: issuer}))
+	}
+	require.Empty(t, svc.settings.ssoAccountURL(map[string]string{SettingKeyOIDCConnectIssuerURL: "https://auth.example", SettingKeySSOApplication: "malformed"}))
 	require.Empty(t, svc.settings.ssoAccountURL(map[string]string{SettingKeyOIDCConnectIssuerURL: "javascript:invalid"}))
 	repo.err = errors.New("db offline")
 	_, err = svc.settings.GetSSOSettings(context.Background())

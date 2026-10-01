@@ -213,6 +213,7 @@ export interface PublicSettings {
   sso_only_enabled?: boolean
   sso_registration_enabled?: boolean
   sso_account_url?: string
+  sso_password_reset_url?: string
   registration_enabled: boolean
   email_verify_enabled: boolean
   force_email_on_third_party_signup: boolean

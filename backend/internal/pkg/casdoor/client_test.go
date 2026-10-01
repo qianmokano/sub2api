@@ -47,7 +47,7 @@ func TestClientPasswordLoginAndRegistration(t *testing.T) {
 	})
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
-	client := New(Config{Issuer: srv.URL + "/", Organization: "kano", Application: "kano/sub2api"}, nil)
+	client := New(Config{Issuer: srv.URL + "/", Organization: "kano", Application: "admin/sub2api"}, nil)
 	identity, challenge, err := client.Login(context.Background(), " user ", " password ")
 	require.NoError(t, err)
 	require.Nil(t, challenge)
@@ -160,11 +160,11 @@ func TestClientSafeProviderErrors(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			require.NoError(t, r.ParseForm())
 			require.Equal(t, "signup", r.Form.Get("method"))
-			require.Equal(t, "kano/sub2api", r.Form.Get("applicationId"))
+			require.Equal(t, "admin/sub2api", r.Form.Get("applicationId"))
 			require.Equal(t, "u@example.com", r.Form.Get("dest"))
 			_ = json.NewEncoder(w).Encode(map[string]string{"status": "error", "msg": tc.message})
 		}))
-		err := New(Config{Issuer: srv.URL, Application: "kano/sub2api"}, nil).SendCode(context.Background(), "u@example.com")
+		err := New(Config{Issuer: srv.URL, Application: "admin/sub2api"}, nil).SendCode(context.Background(), "u@example.com")
 		require.ErrorIs(t, err, tc.want)
 		srv.Close()
 	}

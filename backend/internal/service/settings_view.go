@@ -336,6 +336,7 @@ type PublicSettings struct {
 	SSOOnlyEnabled                      bool
 	SSORegistrationEnabled              bool
 	SSOAccountURL                       string
+	SSOPasswordResetURL                 string
 	RegistrationEnabled                 bool
 	EmailVerifyEnabled                  bool
 	ForceEmailOnThirdPartySignup        bool

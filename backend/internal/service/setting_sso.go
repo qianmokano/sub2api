@@ -55,14 +55,14 @@ func (s *SettingService) GetSSOSettings(ctx context.Context) (*SSOSettings, erro
 		Config: casdoor.Config{
 			Issuer:       strings.TrimRight(strings.TrimSpace(issuer), "/"),
 			Organization: firstNonEmpty(settings[SettingKeySSOOrganization], "kano"),
-			Application:  firstNonEmpty(settings[SettingKeySSOApplication], "kano/sub2api"),
+			Application:  firstNonEmpty(settings[SettingKeySSOApplication], "admin/sub2api"),
 		},
 	}, nil
 }
 
 func validateSSOSettings(settings *SystemSettings) error {
 	settings.SSOOrganization = firstNonEmpty(settings.SSOOrganization, "kano")
-	settings.SSOApplication = firstNonEmpty(settings.SSOApplication, "kano/sub2api")
+	settings.SSOApplication = firstNonEmpty(settings.SSOApplication, "admin/sub2api")
 	if !settings.SSOEnabled {
 		if settings.SSOOnlyEnabled || settings.SSORegistrationEnabled {
 			return infraerrors.BadRequest("SSO_CONFIG_INVALID", "Enable in-page SSO before enabling its login policy or registration")
@@ -78,20 +78,36 @@ func validateSSOConfig(oidcEnabled bool, cfg casdoor.Config) error {
 	u, err := url.Parse(cfg.Issuer)
 	parts := strings.Split(cfg.Application, "/")
 	if !oidcEnabled || err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || strings.Trim(u.Path, "/") != "" ||
-		cfg.Organization == "" || len(parts) != 2 || parts[0] != cfg.Organization || parts[1] == "" {
-		return infraerrors.BadRequest("SSO_CONFIG_INVALID", "Configure an enabled HTTPS OIDC issuer and an application in the selected Casdoor organization")
+		cfg.Organization == "" || len(parts) != 2 || strings.TrimSpace(parts[0]) == "" || strings.TrimSpace(parts[1]) == "" {
+		return infraerrors.BadRequest("SSO_CONFIG_INVALID", "Configure an enabled HTTPS OIDC issuer, a user organization and an application ID (owner/name)")
 	}
 	return nil
 }
 
 func (s *SettingService) ssoAccountURL(settings map[string]string) string {
+	account, _ := s.ssoManagementURLs(settings)
+	return account
+}
+
+func (s *SettingService) ssoPasswordResetURL(settings map[string]string) string {
+	_, reset := s.ssoManagementURLs(settings)
+	return reset
+}
+
+func (s *SettingService) ssoManagementURLs(settings map[string]string) (string, string) {
 	issuer := settings[SettingKeyOIDCConnectIssuerURL]
 	if issuer == "" && s.cfg != nil {
 		issuer = s.cfg.OIDC.IssuerURL
 	}
 	u, err := url.Parse(issuer)
-	if err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil {
-		return ""
+	if err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || strings.Trim(u.Path, "/") != "" {
+		return "", ""
 	}
-	return strings.TrimRight(issuer, "/") + "/account"
+	organization := firstNonEmpty(settings[SettingKeySSOOrganization], "kano")
+	parts := strings.Split(firstNonEmpty(settings[SettingKeySSOApplication], "admin/sub2api"), "/")
+	if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" || strings.TrimSpace(parts[1]) == "" {
+		return "", ""
+	}
+	base := strings.TrimRight(issuer, "/")
+	return base + "/login/" + url.PathEscape(organization), base + "/forget/" + url.PathEscape(parts[1])
 }

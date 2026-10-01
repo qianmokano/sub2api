@@ -208,7 +208,7 @@ onMounted(async () => {
   try {
     const settings = await getPublicSettings()
     if (settings.sso_only_enabled && settings.sso_account_url) {
-      window.location.assign(settings.sso_account_url)
+      window.location.assign(settings.sso_password_reset_url || settings.sso_account_url)
       return
     }
     turnstileEnabled.value = settings.turnstile_enabled

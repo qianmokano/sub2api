@@ -4,7 +4,7 @@
 
 ## 设置与认证流程
 
-在后台 OIDC 设置中保留现有 issuer、客户端和回调配置。页内代理补充 `sso_organization=kano`、`sso_application=kano/sub2api`，不需要在浏览器提供客户端秘密。
+在后台 OIDC 设置中保留现有 issuer、客户端和回调配置。页内代理补充 `sso_organization=kano`、`sso_application=admin/sub2api`，不需要在浏览器提供客户端秘密。应用 ID 使用 Casdoor 的 `owner/name`；应用 owner 与用户 organization 是不同字段，不要求相同。
 
 | 设置 | 默认 | 含义 |
 | --- | --- | --- |
@@ -12,11 +12,13 @@
 | `sso_registration_enabled` | false | Casdoor 邮箱验证码注册；独立于本地注册、邮箱白名单和邀请码 |
 | `sso_only_enabled` | false | 普通用户仅通过 Casdoor 密码或 OIDC 登录；关闭其他认证及本地凭据管理 |
 
-组织、应用必须匹配，issuer 必须为已启用的 HTTPS OIDC 地址。先启用页内认证并验证存量用户，再启用统一注册，最后启用仅统一登录。关闭页内认证前先关闭另两个开关。
+应用应配置为该用户组织的应用，issuer 必须为已启用的 HTTPS OIDC 地址。先启用页内认证并验证存量用户，再启用统一注册，最后启用仅统一登录。关闭页内认证前先关闭另两个开关。
 
 管理员使用 `/login?local=1` 显示本地密码应急表单，后端验证角色、状态、人机验证和已有 TOTP；URL 参数本身不会授予权限。普通用户密码、找回密码及 MFA 管理进入通行证账户页。原业务会话及 refresh token 保持原有生命周期，已有本地 TOTP 保留登录和 step-up 验证。
 
 页内登录不在浏览器建立 Casdoor 会话，首次进入另一个站点可能需要重新输入同一凭据。OIDC 跳转入口保留为兜底。
+
+账户管理使用 `/login/kano` 建立正确组织的 Casdoor 浏览器会话，登录后进入通行证管理界面；找回密码使用 `/forget/sub2api`。不要将新浏览器直接送到 `/account`：无会话时该地址会落到 built-in 默认组织，无法认证 kano 普通用户。公开设置中的这两个地址按实际组织和应用生成。
 
 后端新增 `/api/v1/auth/sso/password-login`、`/sso/mfa`、`/sso/register/send-code`、`/sso/register`。密码仅用于当次 HTTPS 代理，不落库、不记录日志。Casdoor Cookie 保存在 Redis，浏览器仅收到随机 MFA 挑战与可用验证方式；挑战 10 分钟有效、最多 10 次尝试，验证期间持有短期租约，成功后原子消费。Redis 故障拒绝认证。
 
