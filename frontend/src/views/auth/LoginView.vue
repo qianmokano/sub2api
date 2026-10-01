@@ -69,7 +69,7 @@
           </div>
           <div class="mt-1 flex items-center justify-between">
             <span></span>
-            <a v-if="ssoMode && ssoAccountURL" :href="ssoAccountURL" class="text-sm font-medium text-primary-600">{{ t('auth.forgotPassword') }}</a>
+            <a v-if="ssoMode && ssoPasswordResetURL" :href="ssoPasswordResetURL" class="text-sm font-medium text-primary-600">{{ t('auth.forgotPassword') }}</a>
             <router-link
               v-else-if="passwordResetEnabled && !backendModeEnabled"
               to="/forgot-password"
@@ -274,7 +274,7 @@ const showPassword = ref<boolean>(false)
 const publicSettingsLoaded = ref<boolean>(false)
 const ssoEnabled = ref(false)
 const ssoMode = computed(() => ssoEnabled.value && router.currentRoute.value.query.local !== '1')
-const ssoAccountURL = ref('')
+const ssoPasswordResetURL = ref('')
 const ssoChallenge = ref<SSOChallenge | null>(null)
 const oidcRedirect = ref('')
 
@@ -392,7 +392,7 @@ onMounted(async () => {
   try {
     const settings = await getPublicSettings()
     ssoEnabled.value = settings.sso_enabled === true
-    ssoAccountURL.value = settings.sso_account_url || ''
+    ssoPasswordResetURL.value = settings.sso_password_reset_url || settings.sso_account_url || ''
     registrationEnabled.value = ssoEnabled.value ? settings.sso_registration_enabled === true : settings.registration_enabled === true
     turnstileEnabled.value = settings.turnstile_enabled
     turnstileSiteKey.value = settings.turnstile_site_key || ''

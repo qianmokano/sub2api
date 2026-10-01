@@ -121,6 +121,23 @@ describe('LoginView registration entry', () => {
     expect(wrapper.text()).not.toContain('auth.signUp')
   })
 
+  it.each([
+    ['https://auth.example.com/forget/sub2api', 'https://auth.example.com/forget/sub2api'],
+    ['', 'https://auth.example.com/login/kano']
+  ])('links unified password recovery to %j with an account fallback', async (resetURL, expectedURL) => {
+    getPublicSettingsMock.mockResolvedValueOnce({
+      ...publicSettings,
+      sso_enabled: true,
+      sso_account_url: 'https://auth.example.com/login/kano',
+      sso_password_reset_url: resetURL
+    })
+    const wrapper = mountLogin()
+    await flushPromises()
+
+    expect(wrapper.get(`a[href="${expectedURL}"]`).text()).toBe('auth.forgotPassword')
+    wrapper.unmount()
+  })
+
   it('uses Passport account input and keeps MFA retry in the page', async () => {
     getPublicSettingsMock.mockResolvedValueOnce({ ...publicSettings, sso_enabled: true, sso_only_enabled: true, sso_registration_enabled: true, registration_enabled: false })
     loginSSOMock.mockResolvedValue({ requires_sso_mfa: true, challenge: { token: 'challenge', methods: [{ mfa_type: 'otp' }] } })
