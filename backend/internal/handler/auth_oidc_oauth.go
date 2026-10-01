@@ -115,6 +115,17 @@ type oidcJWK struct {
 // OIDCOAuthStart 启动通用 OIDC OAuth 登录流程。
 // GET /api/v1/auth/oauth/oidc/start?redirect=/dashboard
 func (h *AuthHandler) OIDCOAuthStart(c *gin.Context) {
+	if h.settingSvc != nil {
+		policy, err := h.settingSvc.GetSSOSettings(c.Request.Context())
+		if err != nil {
+			response.ErrorFrom(c, err)
+			return
+		}
+		if policy.OnlyEnabled && normalizeOAuthIntent(c.Query("intent")) != oauthIntentLogin {
+			response.ErrorFrom(c, service.ErrSSOOnly)
+			return
+		}
+	}
 	if !h.requireActionCaptchaForOAuthLoginStart(c) {
 		return
 	}
@@ -373,6 +384,9 @@ func (h *AuthHandler) OIDCOAuthCallback(c *gin.Context) {
 		}(),
 		oidcFallbackUsername(subject),
 	)
+	if h.trySSOOIDCCallback(c, frontendCallback, redirectTo, intent, issuer, subject, compatEmail, username, emailVerified) {
+		return
+	}
 	identityRef := service.PendingAuthIdentityKey{
 		ProviderType:    "oidc",
 		ProviderKey:     issuer,

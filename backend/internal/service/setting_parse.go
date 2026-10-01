@@ -55,6 +55,11 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 
 	// 初始化默认设置
 	defaults := map[string]string{
+		SettingKeySSOEnabled:                                "false",
+		SettingKeySSOOnlyEnabled:                            "false",
+		SettingKeySSORegistrationEnabled:                    "false",
+		SettingKeySSOOrganization:                           "kano",
+		SettingKeySSOApplication:                            "kano/sub2api",
 		SettingKeyRegistrationEnabled:                       "true",
 		SettingKeyEmailVerifyEnabled:                        "false",
 		SettingKeyRegistrationEmailSuffixWhitelist:          "[]",
@@ -373,6 +378,11 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 		CustomMenuItems:                        settings[SettingKeyCustomMenuItems],
 		CustomEndpoints:                        settings[SettingKeyCustomEndpoints],
 		BackendModeEnabled:                     settings[SettingKeyBackendModeEnabled] == "true",
+		SSOEnabled:                             settings[SettingKeySSOEnabled] == "true",
+		SSOOnlyEnabled:                         settings[SettingKeySSOOnlyEnabled] == "true",
+		SSORegistrationEnabled:                 settings[SettingKeySSORegistrationEnabled] == "true",
+		SSOOrganization:                        firstNonEmpty(settings[SettingKeySSOOrganization], "kano"),
+		SSOApplication:                         firstNonEmpty(settings[SettingKeySSOApplication], "kano/sub2api"),
 	}
 	result.TableDefaultPageSize, result.TablePageSizeOptions = parseTablePreferences(
 		settings[SettingKeyTableDefaultPageSize],

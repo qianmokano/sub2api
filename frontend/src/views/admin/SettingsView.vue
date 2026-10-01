@@ -3440,6 +3440,15 @@
                 v-if="form.oidc_connect_enabled"
                 class="space-y-6 border-t border-gray-100 pt-4 dark:border-dark-700"
               >
+                <div class="space-y-4 rounded-xl border border-gray-200 p-4 dark:border-dark-600">
+                  <h3 class="font-semibold">{{ t('auth.sso.title') }}</h3>
+                  <p class="text-sm text-gray-500">{{ t('auth.sso.settingsHint') }}</p>
+                  <div class="flex items-center justify-between"><span>{{ t('auth.sso.enabled') }}</span><Toggle :model-value="form.sso_enabled === true" @update:model-value="form.sso_enabled = $event" /></div>
+                  <div class="flex items-center justify-between"><span>{{ t('auth.sso.only') }}</span><Toggle :model-value="form.sso_only_enabled === true" :disabled="!form.sso_enabled" @update:model-value="form.sso_only_enabled = $event" /></div>
+                  <div class="flex items-center justify-between"><span>{{ t('auth.sso.registration') }}</span><Toggle :model-value="form.sso_registration_enabled === true" :disabled="!form.sso_enabled" @update:model-value="form.sso_registration_enabled = $event" /></div>
+                  <label class="input-label">{{ t('auth.sso.organization') }}<input v-model="form.sso_organization" class="input mt-1" /></label>
+                  <label class="input-label">{{ t('auth.sso.application') }}<input v-model="form.sso_application" class="input mt-1" /></label>
+                </div>
                 <div class="grid grid-cols-1 gap-6 lg:grid-cols-3">
                   <div>
                     <label
@@ -9910,6 +9919,11 @@ const form = reactive<SettingsForm>({
   wechat_connect_frontend_redirect_url: "/auth/wechat/callback",
   // Generic OIDC OAuth 登录
   oidc_connect_enabled: false,
+  sso_enabled: false,
+  sso_only_enabled: false,
+  sso_registration_enabled: false,
+  sso_organization: 'kano',
+  sso_application: 'kano/sub2api',
   oidc_connect_provider_name: "OIDC",
   oidc_connect_client_id: "",
   oidc_connect_client_secret: "",
@@ -11568,6 +11582,11 @@ async function saveSettings() {
       wechat_connect_frontend_redirect_url:
         form.wechat_connect_frontend_redirect_url,
       oidc_connect_enabled: form.oidc_connect_enabled,
+      sso_enabled: form.sso_enabled,
+      sso_only_enabled: form.sso_enabled && form.sso_only_enabled,
+      sso_registration_enabled: form.sso_enabled && form.sso_registration_enabled,
+      sso_organization: form.sso_organization,
+      sso_application: form.sso_application,
       oidc_connect_provider_name: form.oidc_connect_provider_name,
       oidc_connect_client_id: form.oidc_connect_client_id,
       oidc_connect_client_secret: form.oidc_connect_client_secret || undefined,

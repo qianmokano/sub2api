@@ -36,6 +36,7 @@ type TotpCache interface {
 	GetLoginSession(ctx context.Context, tempToken string) (*TotpLoginSession, error)
 	SetLoginSession(ctx context.Context, tempToken string, session *TotpLoginSession, ttl time.Duration) error
 	DeleteLoginSession(ctx context.Context, tempToken string) error
+	ConsumeLoginSession(ctx context.Context, tempToken string) (bool, error)
 
 	// Rate limiting
 	IncrementVerifyAttempts(ctx context.Context, userID int64) (int, error)
@@ -62,10 +63,11 @@ type TotpSetupSession struct {
 
 // TotpLoginSession represents a pending 2FA login session
 type TotpLoginSession struct {
-	UserID           int64
-	Email            string
-	TokenExpiry      time.Time
-	PendingOAuthBind *PendingOAuthBindLoginSession `json:"pending_oauth_bind,omitempty"`
+	AuthenticationSource string `json:"authentication_source,omitempty"`
+	UserID               int64
+	Email                string
+	TokenExpiry          time.Time
+	PendingOAuthBind     *PendingOAuthBindLoginSession `json:"pending_oauth_bind,omitempty"`
 }
 
 type PendingOAuthBindLoginSession struct {
@@ -425,6 +427,10 @@ func (s *TotpService) CreateLoginSession(ctx context.Context, userID int64, emai
 	return s.createLoginSession(ctx, userID, email, nil)
 }
 
+func (s *TotpService) CreateSSOLoginSession(ctx context.Context, userID int64, email string) (string, error) {
+	return s.createLoginSessionForSource(ctx, userID, email, nil, "sso")
+}
+
 // CreatePendingOAuthBindLoginSession creates a temporary 2FA session that will
 // finalize a pending OAuth bind after the TOTP code is verified.
 func (s *TotpService) CreatePendingOAuthBindLoginSession(
@@ -446,6 +452,10 @@ func (s *TotpService) createLoginSession(
 	email string,
 	pendingOAuthBind *PendingOAuthBindLoginSession,
 ) (string, error) {
+	return s.createLoginSessionForSource(ctx, userID, email, pendingOAuthBind, "")
+}
+
+func (s *TotpService) createLoginSessionForSource(ctx context.Context, userID int64, email string, pendingOAuthBind *PendingOAuthBindLoginSession, source string) (string, error) {
 	// Generate a random temp token
 	tempToken, err := generateRandomToken(32)
 	if err != nil {
@@ -453,10 +463,11 @@ func (s *TotpService) createLoginSession(
 	}
 
 	session := &TotpLoginSession{
-		UserID:           userID,
-		Email:            email,
-		TokenExpiry:      time.Now().Add(totpLoginTTL),
-		PendingOAuthBind: pendingOAuthBind,
+		AuthenticationSource: source,
+		UserID:               userID,
+		Email:                email,
+		TokenExpiry:          time.Now().Add(totpLoginTTL),
+		PendingOAuthBind:     pendingOAuthBind,
 	}
 
 	if err := s.cache.SetLoginSession(ctx, tempToken, session, totpLoginTTL); err != nil {
@@ -474,6 +485,10 @@ func (s *TotpService) GetLoginSession(ctx context.Context, tempToken string) (*T
 // DeleteLoginSession deletes a login session
 func (s *TotpService) DeleteLoginSession(ctx context.Context, tempToken string) error {
 	return s.cache.DeleteLoginSession(ctx, tempToken)
+}
+
+func (s *TotpService) ConsumeLoginSession(ctx context.Context, tempToken string) (bool, error) {
+	return s.cache.ConsumeLoginSession(ctx, tempToken)
 }
 
 // IsTotpEnabledForUser checks if TOTP is enabled for a specific user

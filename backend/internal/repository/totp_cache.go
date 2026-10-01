@@ -109,6 +109,11 @@ func (c *TotpCache) DeleteLoginSession(ctx context.Context, tempToken string) er
 	return c.rdb.Del(ctx, key).Err()
 }
 
+func (c *TotpCache) ConsumeLoginSession(ctx context.Context, tempToken string) (bool, error) {
+	deleted, err := c.rdb.Del(ctx, totpLoginKeyPrefix+tempToken).Result()
+	return deleted == 1, err
+}
+
 // IncrementVerifyAttempts increments the verify attempt counter
 func (c *TotpCache) IncrementVerifyAttempts(ctx context.Context, userID int64) (int, error) {
 	key := fmt.Sprintf("%s%d", totpAttemptsKeyPrefix, userID)

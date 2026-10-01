@@ -134,6 +134,7 @@
 
         <section
           data-testid="profile-auth-bindings-panel"
+          v-if="!managedCredentials"
           class="card border border-gray-100 bg-white/90 p-6 dark:border-dark-700 dark:bg-dark-900/50"
         >
           <ProfileIdentityBindingsSection
@@ -190,6 +191,7 @@ import type { User, UserAuthBindingStatus, UserAuthProvider, UserProfileSourceCo
 
 const props = withDefaults(defineProps<{
   user: User | null
+  managedCredentials?: boolean
   linuxdoEnabled?: boolean
   dingtalkEnabled?: boolean
   oidcEnabled?: boolean
@@ -199,6 +201,7 @@ const props = withDefaults(defineProps<{
   wechatMpEnabled?: boolean
 }>(), {
   linuxdoEnabled: false,
+  managedCredentials: false,
   dingtalkEnabled: false,
   oidcEnabled: false,
   oidcProviderName: 'OIDC',

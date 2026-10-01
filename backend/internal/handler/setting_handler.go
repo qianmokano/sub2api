@@ -44,6 +44,8 @@ func (h *SettingHandler) GetPublicSettings(c *gin.Context) {
 	}
 
 	response.Success(c, dto.PublicSettings{
+		SSOEnabled: settings.SSOEnabled, SSOOnlyEnabled: settings.SSOOnlyEnabled,
+		SSORegistrationEnabled: settings.SSORegistrationEnabled, SSOAccountURL: settings.SSOAccountURL,
 		RegistrationEnabled:                 settings.RegistrationEnabled,
 		EmailVerifyEnabled:                  settings.EmailVerifyEnabled,
 		ForceEmailOnThirdPartySignup:        settings.ForceEmailOnThirdPartySignup,

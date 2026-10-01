@@ -12,6 +12,11 @@ func firstNonEmpty(values ...string) string {
 }
 
 type SystemSettings struct {
+	SSOEnabled                          bool
+	SSOOnlyEnabled                      bool
+	SSORegistrationEnabled              bool
+	SSOOrganization                     string
+	SSOApplication                      string
 	RegistrationEnabled                 bool
 	EmailVerifyEnabled                  bool
 	RegistrationEmailSuffixWhitelist    []string
@@ -327,6 +332,10 @@ type DefaultSubscriptionSetting struct {
 }
 
 type PublicSettings struct {
+	SSOEnabled                          bool
+	SSOOnlyEnabled                      bool
+	SSORegistrationEnabled              bool
+	SSOAccountURL                       string
 	RegistrationEnabled                 bool
 	EmailVerifyEnabled                  bool
 	ForceEmailOnThirdPartySignup        bool

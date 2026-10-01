@@ -218,6 +218,9 @@ export default {
 
   // Auth
   auth: {
+    sso: {
+      title: 'kano 通行证', account: '邮箱或用户名', verification: '通行证二步验证', method: '验证方式', code: '验证码', verify: '验证并继续', sendCode: '发送验证码', codeSent: '验证码已发送，请查收邮箱', retryLogin: '通行证已创建，请使用同一账号登录', manageAccount: '前往 kano 通行证管理密码与二步验证', enabled: '启用页内统一登录', only: '仅允许统一登录（管理员保留本地应急入口）', registration: '允许通行证注册', organization: 'Casdoor 组织', application: 'Casdoor 应用（组织/应用）', settingsHint: '复用下方 OIDC issuer。统一注册独立于本站注册与邮箱策略；启用仅统一登录前，请确认管理员本地密码和二步验证可用。'
+    },
     welcomeBack: '欢迎回来',
     signInToAccount: '登录您的账户以继续',
     signIn: '登录',
@@ -247,6 +250,20 @@ export default {
     passwordMinLength: '密码至少需要 6 个字符',
     loginFailed: '登录失败，请检查您的凭据后重试。',
     errors: {
+      SSO_ONLY: '请通过 kano 通行证登录或管理账号。',
+      SSO_DISABLED: '统一登录已关闭。',
+      SSO_CHALLENGE_INVALID: '验证已过期，请重新登录。',
+      SSO_CHALLENGE_BUSY: '验证正在进行，请稍后重试。',
+      SSO_IDENTITY_CONFLICT: '该邮箱已有账号，请联系管理员核对身份绑定。',
+      SSO_EMAIL_NOT_VERIFIED: '请先在 kano 通行证验证邮箱。',
+      SSO_IDENTITY_INVALID: '此通行证账号无法登录。',
+      SSO_MFA_CODE_INVALID: '验证码错误，请重试。',
+      SSO_REGISTER_CODE_INVALID: '邮箱验证码错误或已过期。',
+      SSO_CODE_RESEND_WAIT: '请稍后再发送验证码。',
+      SSO_PROVIDER_UNAVAILABLE: 'kano 通行证暂时不可用，请稍后重试。',
+      SSO_ACCOUNT_SYNC_FAILED: '通行证已创建，请使用同一账号登录重试；绑定失败请联系管理员。',
+      SSO_CAPTCHA_REQUIRED: '请使用下方通行证按钮完成验证。',
+      SSO_ACCOUNT_LOCKED: '尝试次数过多，请稍后重试。',
       USER_NOT_ACTIVE: '账号已被禁用',
     },
     registrationFailed: '注册失败，请重试。',

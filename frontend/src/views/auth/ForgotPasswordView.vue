@@ -207,6 +207,10 @@ watch(validationToastMessage, (value, previousValue) => {
 onMounted(async () => {
   try {
     const settings = await getPublicSettings()
+    if (settings.sso_only_enabled && settings.sso_account_url) {
+      window.location.assign(settings.sso_account_url)
+      return
+    }
     turnstileEnabled.value = settings.turnstile_enabled
     turnstileSiteKey.value = settings.turnstile_site_key || ''
     tencentCaptchaEnabled.value = settings.tencent_captcha_enabled === true

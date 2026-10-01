@@ -5,6 +5,8 @@ import RegisterView from '@/views/auth/RegisterView.vue'
 const {
   getPublicSettingsMock,
   registerMock,
+  registerSSOMock,
+  sendSSOCodeMock,
   showErrorMock,
   pushMock,
   verifyActionMock,
@@ -12,6 +14,8 @@ const {
 } = vi.hoisted(() => ({
   getPublicSettingsMock: vi.fn(),
   registerMock: vi.fn(),
+  registerSSOMock: vi.fn(),
+  sendSSOCodeMock: vi.fn(),
   showErrorMock: vi.fn(),
   pushMock: vi.fn(),
   verifyActionMock: vi.fn(),
@@ -61,9 +65,11 @@ vi.mock('vue-i18n', () => ({
 }))
 
 vi.mock('@/stores', () => ({
-  useAuthStore: () => ({ register: (...args: unknown[]) => registerMock(...args) }),
+  useAuthStore: () => ({ register: (...args: unknown[]) => registerMock(...args), registerSSO: registerSSOMock }),
   useAppStore: () => appStoreMock
 }))
+
+vi.mock('@/api/sso', () => ({ sendCode: sendSSOCodeMock, isSSOMFARequired: () => false }))
 
 vi.mock('@/api/auth', async () => {
   const actual = await vi.importActual<typeof import('@/api/auth')>('@/api/auth')
@@ -99,6 +105,8 @@ describe('RegisterView', () => {
   beforeEach(() => {
     getPublicSettingsMock.mockReset()
     registerMock.mockReset()
+    registerSSOMock.mockReset()
+    sendSSOCodeMock.mockReset()
     showErrorMock.mockReset()
     pushMock.mockReset()
     verifyActionMock.mockReset()
@@ -324,5 +332,24 @@ describe('RegisterView', () => {
       expect.objectContaining({ email: 'user@allowed.com' })
     )
     expect(showErrorMock).not.toHaveBeenCalled()
+  })
+
+  it('registers with Passport despite local registration, invitation and email restrictions', async () => {
+    getPublicSettingsMock.mockResolvedValueOnce({ ...publicSettings, sso_enabled: true, sso_registration_enabled: true, registration_enabled: false, invitation_code_enabled: true, email_verify_enabled: true, turnstile_enabled: false, registration_email_suffix_whitelist: ['blocked.invalid'] })
+    registerSSOMock.mockResolvedValue({ access_token: 'token' })
+    const wrapper = mountRegister()
+    await flushPromises()
+    expect(wrapper.find('#invitation_code').exists()).toBe(false)
+    await wrapper.get('#email').setValue('user@custom.example')
+    await wrapper.get('#password').setValue('password')
+    await wrapper.get('#confirmPassword').setValue('password')
+    await wrapper.get('#sso-register-code').setValue('123456')
+    await wrapper.get('form').trigger('submit.prevent')
+    await flushPromises()
+    expect(registerSSOMock).toHaveBeenCalledWith(expect.objectContaining({ email: 'user@custom.example', password: 'password', code: '123456' }))
+    expect(registerMock).not.toHaveBeenCalled()
+    expect(sessionStorage.getItem('register_data')).toBeNull()
+    expect(pushMock).toHaveBeenCalledWith('/dashboard')
+    wrapper.unmount()
   })
 })
