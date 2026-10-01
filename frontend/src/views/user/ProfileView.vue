@@ -13,6 +13,7 @@
         :wechat-enabled="wechatOAuthEnabled"
         :wechat-open-enabled="wechatOAuthOpenEnabled"
         :wechat-mp-enabled="wechatOAuthMPEnabled"
+        :managed-credentials="managedCredentials"
       />
 
       <div
@@ -32,7 +33,8 @@
         </div>
       </div>
 
-      <ProfilePasswordForm />
+      <a v-if="managedCredentials" :href="ssoAccountURL" class="card block p-6 font-medium text-primary-600">{{ t('auth.sso.manageAccount') }}</a>
+      <ProfilePasswordForm v-else />
 
       <ProfileBalanceNotifyCard
         v-if="user && balanceLowNotifyEnabled"
@@ -43,8 +45,8 @@
         :user-email="user.email"
       />
 
-      <ProfileTotpCard />
-      <ProfilePasskeyCard :enabled="passkeyEnabled" />
+      <ProfileTotpCard v-if="!managedCredentials" />
+      <ProfilePasskeyCard v-if="!managedCredentials" :enabled="passkeyEnabled" />
     </div>
   </AppLayout>
 </template>
@@ -67,6 +69,8 @@ const { t } = useI18n()
 const appStore = useAppStore()
 const authStore = useAuthStore()
 const user = computed(() => authStore.user)
+const managedCredentials = computed(() => appStore.cachedPublicSettings?.sso_only_enabled === true && !authStore.isAdmin)
+const ssoAccountURL = computed(() => appStore.cachedPublicSettings?.sso_account_url || '')
 
 const contactInfo = ref('')
 const balanceLowNotifyEnabled = ref(false)

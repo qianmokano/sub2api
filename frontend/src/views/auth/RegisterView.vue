@@ -28,6 +28,13 @@
 
       <!-- Registration Form -->
       <form v-else @submit.prevent="handleRegister" class="space-y-5">
+        <div v-if="ssoEnabled" class="space-y-2">
+          <label for="sso-register-code" class="input-label">{{ t('auth.sso.code') }}</label>
+          <div class="flex gap-2">
+            <input id="sso-register-code" v-model="ssoCode" class="input" autocomplete="one-time-code" required maxlength="128" :disabled="isLoading" />
+            <button type="button" class="btn btn-secondary shrink-0" :disabled="isLoading || ssoCodeCountdown > 0 || !settingsLoaded || agreementGateActive" @click="handleSSOSendCode">{{ ssoCodeCountdown > 0 ? `${ssoCodeCountdown}s` : t('auth.sso.sendCode') }}</button>
+          </div>
+        </div>
         <!-- Email Input -->
         <div>
           <label for="email" class="input-label">
@@ -366,6 +373,7 @@
 
 <script setup lang="ts">
 import { computed, ref, reactive, onMounted, onUnmounted, watch } from 'vue'
+import { sendCode as sendSSOCode, isSSOMFARequired } from '@/api/sso'
 import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { AuthLayout } from '@/components/layout'
@@ -380,6 +388,7 @@ import { useAuthStore, useAppStore } from '@/stores'
 import {
   buildOAuthLoginStartURL,
   getPublicSettings,
+  isTotp2FARequired,
   isWeChatWebOAuthEnabled,
   startOAuthLogin,
   type OAuthLoginStart,
@@ -421,6 +430,10 @@ const confirmPassword = ref('')
 
 // Public settings
 const registrationEnabled = ref<boolean>(true)
+const ssoEnabled = ref(false)
+const ssoCode = ref('')
+const ssoCodeCountdown = ref(0)
+let ssoCodeTimer: ReturnType<typeof setInterval> | undefined
 const emailVerifyEnabled = ref<boolean>(false)
 // Public settings are injected into the app store before Vue mounts. Use that
 // value for the first render so a disabled promo-code field never flashes
@@ -589,6 +602,15 @@ onMounted(async () => {
     )
     emailDomainQuotaEnabled.value = settings.registration_email_domain_quota_enabled === true
     applyLoginAgreementSettings(settings)
+    ssoEnabled.value = settings.sso_enabled === true
+    if (ssoEnabled.value) {
+      registrationEnabled.value = settings.sso_registration_enabled === true
+      emailVerifyEnabled.value = promoCodeEnabled.value = invitationCodeEnabled.value = affiliateEnabled.value = false
+      registrationEmailSuffixWhitelist.value = []
+    }
+    if (settings.sso_only_enabled) {
+      linuxdoOAuthEnabled.value = wechatOAuthEnabled.value = githubOAuthEnabled.value = googleOAuthEnabled.value = false
+    }
 
     // Read promo code from URL parameter only if promo code is enabled
     if (promoCodeEnabled.value) {
@@ -617,6 +639,7 @@ watch(
 )
 
 onUnmounted(() => {
+  if (ssoCodeTimer) clearInterval(ssoCodeTimer)
   if (promoValidateTimeout) {
     clearTimeout(promoValidateTimeout)
   }
@@ -993,6 +1016,38 @@ function validateForm(): boolean {
 
 // ==================== Form Handlers ====================
 
+async function handleSSOSendCode(): Promise<void> {
+  if (!validateEmail(formData.email) || agreementGateActive.value || !registrationEnabled.value) {
+    appStore.showError(t('auth.invalidEmail'))
+    return
+  }
+  if (!(await acquireActionProof())) return
+  isLoading.value = true
+  try {
+    const result = await sendSSOCode({ email: formData.email, ...ssoCaptchaProof() })
+    ssoCodeCountdown.value = result.countdown || 60
+    if (ssoCodeTimer) clearInterval(ssoCodeTimer)
+    ssoCodeTimer = setInterval(() => {
+      ssoCodeCountdown.value--
+      if (ssoCodeCountdown.value <= 0) clearInterval(ssoCodeTimer)
+    }, 1000)
+    appStore.showSuccess(t('auth.sso.codeSent'))
+  } catch (error) {
+    appStore.showError(extractI18nErrorMessage(error, t, 'auth.errors', t('auth.registrationFailed')))
+  } finally {
+    resetCaptchaProof()
+    isLoading.value = false
+  }
+}
+
+function ssoCaptchaProof() {
+  return {
+    turnstile_token: turnstileEnabled.value || aliyunCaptchaEnabled.value ? turnstileToken.value : undefined,
+    tencent_captcha_ticket: tencentCaptchaEnabled.value ? turnstileToken.value : undefined,
+    tencent_captcha_randstr: tencentCaptchaEnabled.value ? tencentCaptchaRandstr.value : undefined
+  }
+}
+
 async function handleRegister(): Promise<void> {
   // Clear previous error
   errorMessage.value = ''
@@ -1047,6 +1102,19 @@ async function handleRegister(): Promise<void> {
   isLoading.value = true
 
   try {
+    if (ssoEnabled.value) {
+      const response = await authStore.registerSSO({ email: formData.email, password: formData.password, code: ssoCode.value, ...ssoCaptchaProof() })
+      formData.password = ''
+      confirmPassword.value = ''
+      if (isSSOMFARequired(response) || isTotp2FARequired(response)) {
+        appStore.showSuccess(t('auth.sso.retryLogin'))
+        await router.push('/login')
+        return
+      }
+      appStore.showSuccess(t('auth.accountCreatedSuccess', { siteName: siteName.value }))
+      await router.push('/dashboard')
+      return
+    }
     const affCode = formData.aff_code.trim() || loadAffiliateReferralCode()
     if (affCode) {
       formData.aff_code = affCode

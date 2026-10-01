@@ -218,6 +218,9 @@ export default {
 
   // Auth
   auth: {
+    sso: {
+      title: 'kano Passport', account: 'Email or username', verification: 'Passport verification', method: 'Verification method', code: 'Verification code', verify: 'Verify and continue', sendCode: 'Send code', codeSent: 'Verification code sent; check your email', retryLogin: 'Passport created; sign in with the same account', manageAccount: 'Manage password and MFA in kano Passport', enabled: 'Enable in-page unified sign-in', only: 'Unified sign-in only (admin local recovery remains available)', registration: 'Allow Passport registration', organization: 'Casdoor organization', application: 'Casdoor application (organization/application)', settingsHint: 'Uses the OIDC issuer below. Unified registration is independent of local registration and email policies. Verify administrator password and MFA recovery before enabling unified sign-in only.'
+    },
     welcomeBack: 'Welcome Back',
     signInToAccount: 'Sign in to your account to continue',
     signIn: 'Sign In',
@@ -247,6 +250,20 @@ export default {
     passwordMinLength: 'Password must be at least 6 characters',
     loginFailed: 'Login failed. Please check your credentials and try again.',
     errors: {
+      SSO_ONLY: 'Use kano Passport to sign in or manage your account.',
+      SSO_DISABLED: 'Unified sign-in is disabled.',
+      SSO_CHALLENGE_INVALID: 'Verification expired; sign in again.',
+      SSO_CHALLENGE_BUSY: 'Verification is in progress; try again shortly.',
+      SSO_IDENTITY_CONFLICT: 'This email already has an account; contact support to verify the identity binding.',
+      SSO_EMAIL_NOT_VERIFIED: 'Verify your email in kano Passport first.',
+      SSO_IDENTITY_INVALID: 'This Passport account cannot sign in.',
+      SSO_MFA_CODE_INVALID: 'Incorrect verification code; try again.',
+      SSO_REGISTER_CODE_INVALID: 'Invalid or expired email verification code.',
+      SSO_CODE_RESEND_WAIT: 'Wait before requesting another code.',
+      SSO_PROVIDER_UNAVAILABLE: 'kano Passport is temporarily unavailable; try again later.',
+      SSO_ACCOUNT_SYNC_FAILED: 'Passport created; sign in with the same account to retry. Contact support if account linking fails.',
+      SSO_CAPTCHA_REQUIRED: 'Use the Passport button below to complete verification.',
+      SSO_ACCOUNT_LOCKED: 'Too many attempts; try again later.',
       USER_NOT_ACTIVE: 'Account has been disabled.',
     },
     registrationFailed: 'Registration failed. Please try again.',

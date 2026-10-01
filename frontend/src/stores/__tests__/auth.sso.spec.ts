@@ -1,0 +1,41 @@
+import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
+import { createPinia, setActivePinia } from 'pinia'
+import { useAuthStore } from '@/stores/auth'
+const { passwordLogin, completeMFA, register } = vi.hoisted(() => ({ passwordLogin: vi.fn(), completeMFA: vi.fn(), register: vi.fn() }))
+vi.mock('@/api/sso', () => ({ passwordLogin, completeMFA, register, isSSOMFARequired: (r: { requires_sso_mfa?: boolean }) => r.requires_sso_mfa === true }))
+vi.mock('@/api', () => ({ authAPI: { getCurrentUser: vi.fn().mockResolvedValue({ user: { id: 1, email: 'user@example.com', role: 'user' } }) }, passkeyAPI: {}, isTotp2FARequired: (r: { requires_2fa?: boolean }) => r.requires_2fa === true }))
+const authResponse = { access_token: 'access', refresh_token: 'refresh', expires_in: 3600, user: { id: 1, email: 'user@example.com', role: 'user' } }
+describe('SSO authentication persistence', () => {
+  beforeEach(() => { setActivePinia(createPinia()); localStorage.clear(); vi.clearAllMocks(); vi.useFakeTimers() })
+  afterEach(() => vi.useRealTimers())
+  it('persists credentials only after provider and local MFA finish', async () => {
+    const store = useAuthStore()
+    passwordLogin.mockResolvedValue({ requires_sso_mfa: true, challenge: { token: 'challenge', methods: [{ mfa_type: 'otp' }] } })
+    await store.loginSSO({ account: 'user', password: 'password' })
+    expect(store.isAuthenticated).toBe(false)
+    expect(localStorage.getItem('auth_token')).toBeNull()
+    completeMFA.mockResolvedValueOnce({ requires_2fa: true, temp_token: 'local' })
+    await store.completeSSOMFA({ challenge: 'challenge', mfa_type: 'otp', passcode: '123456' })
+    expect(store.isAuthenticated).toBe(false)
+    expect(localStorage.getItem('refresh_token')).toBeNull()
+    completeMFA.mockResolvedValueOnce(authResponse)
+    await store.completeSSOMFA({ challenge: 'challenge', mfa_type: 'otp', passcode: '123456' })
+    expect(store.isAuthenticated).toBe(true)
+    expect(localStorage.getItem('auth_token')).toBe('access')
+    expect(localStorage.getItem('refresh_token')).toBe('refresh')
+    expect(Number(localStorage.getItem('token_expires_at'))).toBeGreaterThan(Date.now())
+    const restored = useAuthStore(createPinia())
+    restored.checkAuth()
+    expect(restored.isAuthenticated).toBe(true)
+  })
+  it('registration uses the same token persistence and failed MFA cannot create a session', async () => {
+    const store = useAuthStore()
+    completeMFA.mockRejectedValueOnce(new Error('Incorrect code'))
+    await expect(store.completeSSOMFA({ challenge: 'challenge', mfa_type: 'otp', passcode: 'wrong' })).rejects.toThrow('Incorrect code')
+    expect(localStorage.getItem('auth_token')).toBeNull()
+    register.mockResolvedValueOnce(authResponse)
+    await store.registerSSO({ email: 'user@example.com', password: 'password', code: '123456' })
+    expect(store.isAuthenticated).toBe(true)
+    expect(localStorage.getItem('refresh_token')).toBe('refresh')
+  })
+})

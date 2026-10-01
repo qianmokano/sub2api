@@ -206,7 +206,7 @@ import { useI18n } from 'vue-i18n'
 import { AuthLayout } from '@/components/layout'
 import Icon from '@/components/icons/Icon.vue'
 import { useAppStore } from '@/stores'
-import { resetPassword } from '@/api/auth'
+import { resetPassword, getPublicSettings } from '@/api/auth'
 
 const { t } = useI18n()
 
@@ -252,7 +252,12 @@ const isInvalidLink = computed(() => !email.value || !token.value)
 
 // ==================== Lifecycle ====================
 
-onMounted(() => {
+onMounted(async () => {
+  const settings = await getPublicSettings().catch(() => null)
+  if (settings?.sso_only_enabled && settings.sso_account_url) {
+    window.location.assign(settings.sso_account_url)
+    return
+  }
   // Get email and token from URL query parameters
   email.value = (route.query.email as string) || ''
   token.value = (route.query.token as string) || ''

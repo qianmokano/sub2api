@@ -6,6 +6,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed, readonly } from 'vue'
 import { authAPI, isTotp2FARequired, passkeyAPI, type LoginResponse } from '@/api'
+import * as ssoAPI from '@/api/sso'
 import type {
   User,
   LoginRequest,
@@ -281,6 +282,25 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
+  function acceptSSOResponse(response: ssoAPI.SSOLoginResponse): ssoAPI.SSOLoginResponse {
+    if (!ssoAPI.isSSOMFARequired(response) && !isTotp2FARequired(response)) {
+      setAuthFromResponse(response)
+    }
+    return response
+  }
+
+  async function loginSSO(request: Parameters<typeof ssoAPI.passwordLogin>[0]) {
+    return acceptSSOResponse(await ssoAPI.passwordLogin(request))
+  }
+
+  async function completeSSOMFA(request: Parameters<typeof ssoAPI.completeMFA>[0]) {
+    return acceptSSOResponse(await ssoAPI.completeMFA(request))
+  }
+
+  async function registerSSO(request: Parameters<typeof ssoAPI.register>[0]) {
+    return acceptSSOResponse(await ssoAPI.register(request))
+  }
+
   async function loginWithPasskey(proof?: ActionCaptchaRequestProof): Promise<User> {
     try {
       const response = await passkeyAPI.login(proof)
@@ -503,6 +523,9 @@ export const useAuthStore = defineStore('auth', () => {
 
     // Actions
     login,
+    loginSSO,
+    completeSSOMFA,
+    registerSSO,
     loginWithPasskey,
     login2FA,
     register,

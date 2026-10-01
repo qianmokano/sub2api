@@ -11,11 +11,12 @@
         </p>
       </div>
       <!-- Login Form -->
-      <form @submit.prevent="handleLogin" class="space-y-5">
+      <SSOMFAForm v-if="ssoChallenge" :challenge="ssoChallenge" :loading="isLoading" :error="errorMessage" @verify="handleSSOMFA" @cancel="ssoChallenge = null; errorMessage = ''" />
+      <form v-else @submit.prevent="handleLogin" class="space-y-5">
         <!-- Email Input -->
         <div>
           <label for="email" class="input-label">
-            {{ t('auth.emailLabel') }}
+            {{ t(ssoMode ? 'auth.sso.account' : 'auth.emailLabel') }}
           </label>
           <div class="relative">
             <div class="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3.5">
@@ -24,7 +25,7 @@
             <input
               id="email"
               v-model="formData.email"
-              type="email"
+              :type="ssoMode ? 'text' : 'email'"
               required
               autofocus
               autocomplete="email"
@@ -68,8 +69,9 @@
           </div>
           <div class="mt-1 flex items-center justify-between">
             <span></span>
+            <a v-if="ssoMode && ssoAccountURL" :href="ssoAccountURL" class="text-sm font-medium text-primary-600">{{ t('auth.forgotPassword') }}</a>
             <router-link
-              v-if="passwordResetEnabled && !backendModeEnabled"
+              v-else-if="passwordResetEnabled && !backendModeEnabled"
               to="/forgot-password"
               class="text-sm font-medium text-primary-600 transition-colors hover:text-primary-500 dark:text-primary-400 dark:hover:text-primary-300"
             >
@@ -233,6 +235,8 @@ import WechatOAuthSection from '@/components/auth/WechatOAuthSection.vue'
 import EmailOAuthButtons from '@/components/auth/EmailOAuthButtons.vue'
 import LoginAgreementPrompt from '@/components/auth/LoginAgreementPrompt.vue'
 import TotpLoginModal from '@/components/auth/TotpLoginModal.vue'
+import SSOMFAForm from '@/components/auth/SSOMFAForm.vue'
+import { isSSOMFARequired, type SSOChallenge, type SSOLoginResponse } from '@/api/sso'
 import Icon from '@/components/icons/Icon.vue'
 import TurnstileWidget from '@/components/CaptchaChallenge.vue'
 import { useAuthStore, useAppStore } from '@/stores'
@@ -268,6 +272,11 @@ const passkeyLoading = ref<boolean>(false)
 const errorMessage = ref<string>('')
 const showPassword = ref<boolean>(false)
 const publicSettingsLoaded = ref<boolean>(false)
+const ssoEnabled = ref(false)
+const ssoMode = computed(() => ssoEnabled.value && router.currentRoute.value.query.local !== '1')
+const ssoAccountURL = ref('')
+const ssoChallenge = ref<SSOChallenge | null>(null)
+const oidcRedirect = ref('')
 
 // Public settings
 const registrationEnabled = ref<boolean>(false)
@@ -382,7 +391,9 @@ onMounted(async () => {
 
   try {
     const settings = await getPublicSettings()
-    registrationEnabled.value = settings.registration_enabled === true
+    ssoEnabled.value = settings.sso_enabled === true
+    ssoAccountURL.value = settings.sso_account_url || ''
+    registrationEnabled.value = ssoEnabled.value ? settings.sso_registration_enabled === true : settings.registration_enabled === true
     turnstileEnabled.value = settings.turnstile_enabled
     turnstileSiteKey.value = settings.turnstile_site_key || ''
     tencentCaptchaEnabled.value = settings.tencent_captcha_enabled === true
@@ -403,7 +414,20 @@ onMounted(async () => {
     backendModeEnabled.value = settings.backend_mode_enabled
     passwordResetEnabled.value = settings.password_reset_enabled
     passkeyEnabled.value = settings.passkey_enabled === true
+    if (settings.sso_only_enabled) {
+      linuxdoOAuthEnabled.value = dingtalkOAuthEnabled.value = wechatOAuthEnabled.value = false
+      githubOAuthEnabled.value = googleOAuthEnabled.value = passkeyEnabled.value = false
+    }
     applyLoginAgreementSettings(settings)
+    const fragment = new URLSearchParams(window.location.hash.slice(1))
+    if (fragment.get('sso_totp_token')) {
+      totpTempToken.value = fragment.get('sso_totp_token') || ''
+      totpUserEmailMasked.value = fragment.get('email_masked') || ''
+      const target = fragment.get('redirect') || '/dashboard'
+      oidcRedirect.value = target.startsWith('/') && !target.startsWith('//') && !target.includes('://') ? target : '/dashboard'
+      window.history.replaceState(null, '', window.location.pathname + window.location.search)
+      show2FAModal.value = true
+    }
   } catch (error) {
     console.error('Failed to load public settings:', error)
     loginAgreementEnabled.value = false
@@ -535,7 +559,7 @@ function validateForm(): boolean {
   if (!formData.email.trim()) {
     errors.email = t('auth.emailRequired')
     isValid = false
-  } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) {
+  } else if (!ssoMode.value && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) {
     errors.email = t('auth.invalidEmail')
     isValid = false
   }
@@ -577,7 +601,7 @@ async function handleLogin(): Promise<void> {
 
   try {
     // Call auth store login（阿里云 captchaVerifyParam 复用 turnstile_token 字段）
-    const response = await authStore.login({
+    const credentials = {
       email: formData.email,
       password: formData.password,
       turnstile_token:
@@ -586,7 +610,15 @@ async function handleLogin(): Promise<void> {
       tencent_captcha_randstr: tencentCaptchaEnabled.value
         ? tencentCaptchaRandstr.value
         : undefined
-    })
+    }
+    const response = ssoMode.value
+      ? await authStore.loginSSO({ ...credentials, account: formData.email })
+      : await authStore.login(credentials)
+    if (isSSOMFARequired(response)) {
+      ssoChallenge.value = response.challenge
+      formData.password = ''
+      return
+    }
 
     // Check if 2FA is required
     if (isTotp2FARequired(response)) {
@@ -660,6 +692,30 @@ async function handlePasskeyLogin(): Promise<void> {
   }
 }
 
+async function handleSSOMFA(method: string, passcode: string): Promise<void> {
+  if (!ssoChallenge.value) return
+  isLoading.value = true
+  errorMessage.value = ''
+  try {
+    const response: SSOLoginResponse = await authStore.completeSSOMFA({ challenge: ssoChallenge.value.token, mfa_type: method, passcode })
+    if (isSSOMFARequired(response)) return
+    ssoChallenge.value = null
+    if (isTotp2FARequired(response)) {
+      totpTempToken.value = response.temp_token || ''
+      totpUserEmailMasked.value = response.user_email_masked || ''
+      show2FAModal.value = true
+      return
+    }
+    clearAllAffiliateReferralCodes()
+    appStore.showSuccess(t('auth.loginSuccess'))
+    await router.push((router.currentRoute.value.query.redirect as string) || '/dashboard')
+  } catch (error) {
+    errorMessage.value = extractI18nErrorMessage(error, t, 'auth.errors', t('auth.loginFailed'))
+  } finally {
+    isLoading.value = false
+  }
+}
+
 async function handleOAuthStart(request: OAuthLoginStart): Promise<void> {
   if (authActionDisabled.value) return
 
@@ -713,7 +769,7 @@ async function handle2FAVerify(code: string): Promise<void> {
     appStore.showSuccess(t('auth.loginSuccess'))
 
     // Redirect to dashboard or intended route
-    const redirectTo = (router.currentRoute.value.query.redirect as string) || '/dashboard'
+    const redirectTo = oidcRedirect.value || (router.currentRoute.value.query.redirect as string) || '/dashboard'
     await router.push(redirectTo)
   } catch (error: unknown) {
     const err = error as { message?: string; response?: { data?: { message?: string } } }
