@@ -108,6 +108,16 @@ func newAuthServiceWithEnt(
 	_, err = db.Exec("PRAGMA foreign_keys = ON")
 	require.NoError(t, err)
 	_, err = db.Exec(`
+CREATE TABLE IF NOT EXISTS user_avatars (
+	user_id INTEGER PRIMARY KEY,
+	storage_provider TEXT NOT NULL,
+	storage_key TEXT NOT NULL,
+	url TEXT NOT NULL,
+	content_type TEXT NOT NULL,
+	byte_size INTEGER NOT NULL,
+	sha256 TEXT NOT NULL,
+	updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 CREATE TABLE IF NOT EXISTS user_provider_default_grants (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
 	user_id INTEGER NOT NULL,

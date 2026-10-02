@@ -104,7 +104,7 @@ func TestSSOOIDCFallbackUsesBoundSubjectAndLocalMFA(t *testing.T) {
 	_, err = client.AuthIdentity.Create().SetUserID(user.ID).SetProviderType("oidc").SetProviderKey("https://auth.example").SetProviderSubject("bound-sub").Save(context.Background())
 	require.NoError(t, err)
 	c, w := ssoRequest("/api/v1/auth/oauth/oidc/callback", `{}`)
-	require.True(t, h.trySSOOIDCCallback(c, "/auth/oidc/callback", "/keys", oauthIntentLogin, "https://auth.example", "bound-sub", "changed@example.com", "Changed", nil))
+	require.True(t, h.trySSOOIDCCallback(c, "/auth/oidc/callback", "/keys", oauthIntentLogin, "https://auth.example", &casdoor.Identity{Subject: "bound-sub", Email: "changed@example.com", DisplayName: "Changed"}))
 	c.Writer.WriteHeaderNow()
 	require.Equal(t, http.StatusFound, w.Code)
 	location, err := url.Parse(w.Header().Get("Location"))
@@ -118,7 +118,7 @@ func TestSSOOIDCFallbackUsesBoundSubjectAndLocalMFA(t *testing.T) {
 	require.Equal(t, user.ID, session.UserID)
 	require.Equal(t, "sso", session.AuthenticationSource)
 	c, w = ssoRequest("/api/v1/auth/oauth/oidc/callback", `{}`)
-	require.True(t, h.trySSOOIDCCallback(c, "/auth/oidc/callback", "/keys", oauthIntentBindCurrentUser, "https://auth.example", "bound-sub", user.Email, "", boolPtr(true)))
+	require.True(t, h.trySSOOIDCCallback(c, "/auth/oidc/callback", "/keys", oauthIntentBindCurrentUser, "https://auth.example", &casdoor.Identity{Subject: "bound-sub", Email: user.Email, EmailVerified: true}))
 	require.Contains(t, w.Header().Get("Location"), "SSO_ONLY")
 }
 

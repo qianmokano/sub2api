@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/casdoor"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/stretchr/testify/require"
 )
@@ -37,7 +38,7 @@ func TestSSOEndpointsCompleteAuthenticationWithoutLeakingProviderState(t *testin
 		case "/api/send-verification-code", "/api/signup":
 			_, _ = w.Write([]byte(`{"status":"ok"}`))
 		case "/api/get-account":
-			_, _ = w.Write([]byte(`{"status":"ok","data":{"id":"bound-sub","owner":"kano","email":"bound@example.com","emailVerified":true}}`))
+			_, _ = w.Write([]byte(`{"status":"ok","data":{"id":"bound-sub","owner":"kano","email":"bound@example.com","emailVerified":true,"displayName":"Passport nickname","avatar":"https://auth.example/password-avatar.png"}}`))
 		default:
 			t.Fatalf("unexpected IdP path %s", r.URL.Path)
 		}
@@ -47,7 +48,7 @@ func TestSSOEndpointsCompleteAuthenticationWithoutLeakingProviderState(t *testin
 	http.DefaultTransport = srv.Client().Transport
 	t.Cleanup(func() { http.DefaultTransport = previous })
 	h, client := newOAuthPendingFlowTestHandlerWithDependencies(t, oauthPendingFlowTestHandlerOptions{settingValues: map[string]string{
-		service.SettingKeySSOEnabled: "true", service.SettingKeySSORegistrationEnabled: "true", service.SettingKeyOIDCConnectEnabled: "true", service.SettingKeyOIDCConnectIssuerURL: srv.URL,
+		service.SettingKeySSOEnabled: "true", service.SettingKeySSOOnlyEnabled: "true", service.SettingKeySSORegistrationEnabled: "true", service.SettingKeyOIDCConnectEnabled: "true", service.SettingKeyOIDCConnectIssuerURL: srv.URL,
 	}})
 	entity, err := client.User.Create().SetEmail("bound@example.com").SetPasswordHash("hash").SetRole(service.RoleUser).SetStatus(service.StatusActive).Save(context.Background())
 	require.NoError(t, err)
@@ -76,6 +77,10 @@ func TestSSOEndpointsCompleteAuthenticationWithoutLeakingProviderState(t *testin
 	h.SSOPasswordLogin(c)
 	require.Equal(t, http.StatusOK, w.Code)
 	require.NotEmpty(t, decodeJSONResponseData(t, w)["refresh_token"])
+	profile, err := h.userService.GetProfile(context.Background(), entity.ID)
+	require.NoError(t, err)
+	require.Equal(t, "Passport nickname", profile.Username)
+	require.Equal(t, "https://auth.example/password-avatar.png", profile.AvatarURL)
 	c, w = ssoRequest("/api/v1/auth/sso/register/send-code", `{"email":"new@example.com"}`)
 	h.SSOSendCode(c)
 	require.Equal(t, http.StatusOK, w.Code)
@@ -99,14 +104,22 @@ func TestSSOEndpointsCompleteAuthenticationWithoutLeakingProviderState(t *testin
 
 func TestSSOOIDCCallbackNoMFAIssuesTokensAfterSubjectResolution(t *testing.T) {
 	h, client := newOAuthPendingFlowTestHandlerWithDependencies(t, oauthPendingFlowTestHandlerOptions{settingValues: map[string]string{
-		service.SettingKeySSOEnabled: "true", service.SettingKeyOIDCConnectEnabled: "true", service.SettingKeyOIDCConnectIssuerURL: "https://auth.example",
+		service.SettingKeySSOEnabled: "true", service.SettingKeySSOOnlyEnabled: "true", service.SettingKeyOIDCConnectEnabled: "true", service.SettingKeyOIDCConnectIssuerURL: "https://auth.example",
 	}})
 	entity, err := client.User.Create().SetEmail("bound@example.com").SetPasswordHash("hash").SetRole(service.RoleUser).SetStatus(service.StatusActive).Save(context.Background())
 	require.NoError(t, err)
 	_, err = client.AuthIdentity.Create().SetUserID(entity.ID).SetProviderType("oidc").SetProviderKey("https://auth.example").SetProviderSubject("bound-sub").Save(context.Background())
 	require.NoError(t, err)
 	c, w := ssoRequest("/api/v1/auth/oauth/oidc/callback", `{}`)
-	require.True(t, h.trySSOOIDCCallback(c, "/auth/oidc/callback", "/keys", oauthIntentLogin, "https://auth.example", "bound-sub", "changed@example.com", "", nil))
+	avatar := "https://auth.example/avatar.png"
+	require.True(t, h.trySSOOIDCCallback(c, "/auth/oidc/callback", "/keys", oauthIntentLogin, "https://auth.example", &casdoor.Identity{Subject: "bound-sub", Email: "changed@example.com", DisplayName: "New nickname", AvatarURL: &avatar}))
+	stored, err := client.User.Get(context.Background(), entity.ID)
+	require.NoError(t, err)
+	require.Equal(t, entity.Email, stored.Email)
+	require.Equal(t, "New nickname", stored.Username)
+	profile, err := h.userService.GetProfile(context.Background(), entity.ID)
+	require.NoError(t, err)
+	require.Equal(t, avatar, profile.AvatarURL)
 	location, err := url.Parse(w.Header().Get("Location"))
 	require.NoError(t, err)
 	fragment, err := url.ParseQuery(location.Fragment)
@@ -115,12 +128,12 @@ func TestSSOOIDCCallbackNoMFAIssuesTokensAfterSubjectResolution(t *testing.T) {
 	require.NotEmpty(t, fragment.Get("refresh_token"))
 	require.Equal(t, "/keys", fragment.Get("redirect"))
 	c, w = ssoRequest("/api/v1/auth/oauth/oidc/callback", `{}`)
-	require.True(t, h.trySSOOIDCCallback(c, "/auth/oidc/callback", "/keys", oauthIntentLogin, "https://wrong.example", "bound-sub", "", "", nil))
+	require.True(t, h.trySSOOIDCCallback(c, "/auth/oidc/callback", "/keys", oauthIntentLogin, "https://wrong.example", &casdoor.Identity{Subject: "bound-sub"}))
 	require.NotContains(t, w.Header().Get("Location"), "access_token")
 	_, err = client.User.UpdateOneID(entity.ID).SetStatus("disabled").Save(context.Background())
 	require.NoError(t, err)
 	c, w = ssoRequest("/api/v1/auth/oauth/oidc/callback", `{}`)
-	require.True(t, h.trySSOOIDCCallback(c, "/auth/oidc/callback", "/keys", oauthIntentLogin, "https://auth.example", "bound-sub", "", "", nil))
+	require.True(t, h.trySSOOIDCCallback(c, "/auth/oidc/callback", "/keys", oauthIntentLogin, "https://auth.example", &casdoor.Identity{Subject: "bound-sub"}))
 	require.NotContains(t, w.Header().Get("Location"), "access_token")
 	c, w = ssoRequest("/api/v1/auth/sso/password-login", `{}`)
 	h.finishSSOLogin(c, &service.User{Status: "disabled"})

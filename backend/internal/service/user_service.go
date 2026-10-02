@@ -501,6 +501,15 @@ func (s *UserService) updateProfile(ctx context.Context, userID int64, req Updat
 		return nil, 0, fmt.Errorf("get user: %w", err)
 	}
 	oldConcurrency := user.Concurrency
+	if !user.IsAdmin() && s.settingRepo != nil && (req.Username != nil || req.AvatarURL != nil) {
+		settings, err := s.settingRepo.GetMultiple(ctx, []string{SettingKeySSOOnlyEnabled})
+		if err != nil {
+			return nil, oldConcurrency, ErrServiceUnavailable
+		}
+		if settings[SettingKeySSOOnlyEnabled] == "true" {
+			return nil, oldConcurrency, ErrSSOOnly
+		}
+	}
 
 	// fields 只登记本次请求真正带上的字段。余额、状态等列不由这里回写，
 	// 否则并发的扣费与状态变更会被这份快照回滚。

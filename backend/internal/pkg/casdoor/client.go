@@ -32,15 +32,15 @@ type Config struct {
 }
 
 type Identity struct {
-	Subject       string `json:"id"`
-	Owner         string `json:"owner"`
-	Email         string `json:"email"`
-	EmailVerified bool   `json:"emailVerified"`
-	Username      string `json:"name"`
-	DisplayName   string `json:"displayName"`
-	AvatarURL     string `json:"avatar"`
-	IsForbidden   bool   `json:"isForbidden"`
-	IsDeleted     bool   `json:"isDeleted"`
+	Subject       string  `json:"id"`
+	Owner         string  `json:"owner"`
+	Email         string  `json:"email"`
+	EmailVerified bool    `json:"emailVerified"`
+	Username      string  `json:"name"`
+	DisplayName   string  `json:"displayName"`
+	AvatarURL     *string `json:"avatar"`
+	IsForbidden   bool    `json:"isForbidden"`
+	IsDeleted     bool    `json:"isDeleted"`
 }
 
 type MFAMethod struct {

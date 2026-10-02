@@ -7,6 +7,7 @@ import (
 	"crypto/rsa"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
@@ -117,8 +118,23 @@ func TestOIDCParseUserInfoIncludesSuggestedProfile(t *testing.T) {
 	require.Equal(t, "alice", claims.Username)
 	require.Equal(t, "Alice Example", claims.DisplayName)
 	require.Equal(t, "https://cdn.example/avatar.png", claims.AvatarURL)
+	require.True(t, claims.AvatarPresent)
 	require.NotNil(t, claims.EmailVerified)
 	require.True(t, *claims.EmailVerified)
+}
+
+func TestOIDCParseUserInfoDistinguishesMissingAndRemovedAvatar(t *testing.T) {
+	for _, tc := range []struct {
+		body    string
+		present bool
+	}{
+		{`{"sub":"user"}`, false}, {`{"picture":null}`, false},
+		{`{"picture":""}`, true}, {`{"avatar_url":""}`, true},
+	} {
+		claims := oidcParseUserInfo(tc.body, config.OIDCConnectConfig{})
+		require.Equal(t, tc.present, claims.AvatarPresent)
+		require.Empty(t, claims.AvatarURL)
+	}
 }
 
 func buildRSAJWK(kid string, pub *rsa.PublicKey) oidcJWK {
@@ -268,6 +284,54 @@ func TestOIDCOAuthCallbackAllowsOptionalPKCEAndIDTokenValidation(t *testing.T) {
 	require.Equal(t, http.StatusFound, recorder.Code)
 	require.Equal(t, "/auth/oidc/callback", recorder.Header().Get("Location"))
 	require.NotNil(t, findCookie(recorder.Result().Cookies(), oauthPendingSessionCookieName))
+}
+
+func TestOIDCOAuthCallbackSyncsUnifiedProfileFromUserInfo(t *testing.T) {
+	for _, omitAvatar := range []bool{false, true} {
+		t.Run(fmt.Sprintf("removed-avatar=%t", omitAvatar), func(t *testing.T) {
+			cfg, cleanup := newOIDCTestProvider(t, oidcProviderFixture{
+				Subject: "sync-sub", PreferredUsername: "account-name", DisplayName: "Fresh nickname",
+				AvatarURL: "https://auth.example/fresh.png", OmitAvatar: omitAvatar,
+				Email: "passport@example.com", EmailVerified: true,
+			})
+			defer cleanup()
+			h, client := newOIDCOAuthHandlerAndClientWithSettings(t, false, cfg, map[string]string{
+				service.SettingKeySSOEnabled: "true", service.SettingKeySSOOnlyEnabled: "true",
+			})
+			ctx := context.Background()
+			user, err := client.User.Create().SetEmail("original@example.com").SetUsername("Local nickname").
+				SetPasswordHash("hash").SetRole(service.RoleUser).SetStatus(service.StatusActive).SetBalance(42).Save(ctx)
+			require.NoError(t, err)
+			_, err = client.AuthIdentity.Create().SetUserID(user.ID).SetProviderType("oidc").
+				SetProviderKey(cfg.IssuerURL).SetProviderSubject("sync-sub").Save(ctx)
+			require.NoError(t, err)
+			_, err = h.userService.SetAvatar(ctx, user.ID, "https://auth.example/old.png")
+			require.NoError(t, err)
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/oauth/oidc/callback?code=oidc-code&state=state-123", nil)
+			req.AddCookie(encodedCookie(oidcOAuthStateCookieName, "state-123"))
+			req.AddCookie(encodedCookie(oidcOAuthRedirectCookie, "/dashboard"))
+			req.AddCookie(encodedCookie(oidcOAuthVerifierCookie, "verifier-123"))
+			req.AddCookie(encodedCookie(oidcOAuthNonceCookie, "nonce-sync-sub"))
+			req.AddCookie(encodedCookie(oidcOAuthIntentCookieName, oauthIntentLogin))
+			req.AddCookie(encodedCookie(oauthPendingBrowserCookieName, "browser-sync"))
+			c.Request = req
+			h.OIDCOAuthCallback(c)
+			require.Equal(t, http.StatusFound, w.Code)
+			require.Contains(t, w.Header().Get("Location"), "access_token")
+			profile, err := h.userService.GetProfile(ctx, user.ID)
+			require.NoError(t, err)
+			require.Equal(t, "Fresh nickname", profile.Username)
+			require.Equal(t, "original@example.com", profile.Email)
+			require.Equal(t, 42.0, profile.Balance)
+			if omitAvatar {
+				require.Empty(t, profile.AvatarURL)
+			} else {
+				require.Equal(t, "https://auth.example/fresh.png", profile.AvatarURL)
+			}
+		})
+	}
 }
 
 func TestOIDCOAuthCallbackCreatesLoginPendingSessionForExistingIdentityUser(t *testing.T) {
@@ -1158,6 +1222,7 @@ type oidcProviderFixture struct {
 	PreferredUsername string
 	DisplayName       string
 	AvatarURL         string
+	OmitAvatar        bool
 	Email             string
 	EmailVerified     bool
 }
@@ -1248,6 +1313,9 @@ func newOIDCTestProvider(t *testing.T, fixture oidcProviderFixture) (config.OIDC
 		"picture":            fixture.AvatarURL,
 		"email":              fixture.Email,
 		"email_verified":     fixture.EmailVerified,
+	}
+	if fixture.OmitAvatar {
+		delete(userInfoPayload, "picture")
 	}
 
 	var issuer string
