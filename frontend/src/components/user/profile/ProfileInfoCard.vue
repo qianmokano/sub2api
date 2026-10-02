@@ -107,15 +107,30 @@
           <div class="mb-5 flex items-start justify-between gap-4">
             <div>
               <h3 class="text-lg font-semibold text-gray-900 dark:text-white">
-                {{ t('profile.basicsTitle') }}
+                {{ managedCredentials ? t('auth.sso.profileTitle') : t('profile.basicsTitle') }}
               </h3>
               <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                {{ t('profile.basicsDescription') }}
+                {{ managedCredentials ? t('auth.sso.profileManagedHint') : t('profile.basicsDescription') }}
               </p>
             </div>
           </div>
 
-          <div class="grid gap-6 sm:grid-cols-1 md:grid-cols-2">
+          <div v-if="managedCredentials" data-testid="profile-passport-management">
+            <a
+              v-if="ssoAccountUrl"
+              :href="ssoAccountUrl"
+              class="btn btn-primary"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              {{ t('auth.sso.manageAccount') }}
+            </a>
+            <p v-else class="text-sm text-gray-500 dark:text-gray-400">
+              {{ t('auth.sso.accountUnavailable') }}
+            </p>
+          </div>
+
+          <div v-else class="grid gap-6 sm:grid-cols-1 md:grid-cols-2">
             <div class="rounded-3xl border border-gray-100 bg-gray-50/80 p-5 dark:border-dark-700 dark:bg-dark-900/30">
               <ProfileAvatarCard
                 :user="user"
@@ -192,6 +207,7 @@ import type { User, UserAuthBindingStatus, UserAuthProvider, UserProfileSourceCo
 const props = withDefaults(defineProps<{
   user: User | null
   managedCredentials?: boolean
+  ssoAccountUrl?: string
   linuxdoEnabled?: boolean
   dingtalkEnabled?: boolean
   oidcEnabled?: boolean
@@ -202,6 +218,7 @@ const props = withDefaults(defineProps<{
 }>(), {
   linuxdoEnabled: false,
   managedCredentials: false,
+  ssoAccountUrl: '',
   dingtalkEnabled: false,
   oidcEnabled: false,
   oidcProviderName: 'OIDC',

@@ -55,7 +55,8 @@ type mockUserRepoTxState struct {
 }
 
 type mockUserSettingRepo struct {
-	values map[string]string
+	values         map[string]string
+	getMultipleErr error
 }
 
 func (m *mockUserSettingRepo) Get(context.Context, string) (*Setting, error) {
@@ -71,6 +72,9 @@ func (m *mockUserSettingRepo) Set(context.Context, string, string) error {
 }
 
 func (m *mockUserSettingRepo) GetMultiple(_ context.Context, keys []string) (map[string]string, error) {
+	if m.getMultipleErr != nil {
+		return nil, m.getMultipleErr
+	}
 	out := make(map[string]string, len(keys))
 	for _, key := range keys {
 		if value, ok := m.values[key]; ok {
@@ -78,6 +82,43 @@ func (m *mockUserSettingRepo) GetMultiple(_ context.Context, keys []string) (map
 		}
 	}
 	return out, nil
+}
+
+func TestUpdateProfile_ManagedIdentityFieldsAreReadOnly(t *testing.T) {
+	name, avatar, threshold := "Changed", "https://example.com/avatar.png", 10.0
+	for _, req := range []UpdateProfileRequest{
+		{Username: &name}, {AvatarURL: &avatar}, {Username: &name, BalanceNotifyThreshold: &threshold},
+	} {
+		repo := &mockUserRepo{getByIDUser: &User{ID: 7, Role: RoleUser, Username: "Original", Concurrency: 3}}
+		svc := NewUserService(repo, &mockUserSettingRepo{values: map[string]string{SettingKeySSOOnlyEnabled: "true"}}, nil, nil)
+		_, err := svc.UpdateProfile(context.Background(), 7, req)
+		require.ErrorIs(t, err, ErrSSOOnly)
+		require.Zero(t, repo.updateCalls)
+		require.Empty(t, repo.upsertAvatarArgs)
+	}
+}
+
+func TestUpdateProfile_ManagedModeKeepsNotificationsAndAdminEditing(t *testing.T) {
+	name, threshold := "Changed", 10.0
+	for _, tc := range []struct {
+		role, only string
+		req        UpdateProfileRequest
+	}{
+		{RoleUser, "true", UpdateProfileRequest{BalanceNotifyThreshold: &threshold}},
+		{RoleAdmin, "true", UpdateProfileRequest{Username: &name}},
+		{RoleUser, "false", UpdateProfileRequest{Username: &name}},
+	} {
+		repo := &mockUserRepo{getByIDUser: &User{ID: 7, Role: tc.role, Username: "Original", Concurrency: 3}}
+		svc := NewUserService(repo, &mockUserSettingRepo{values: map[string]string{SettingKeySSOOnlyEnabled: tc.only}}, nil, nil)
+		_, err := svc.UpdateProfile(context.Background(), 7, tc.req)
+		require.NoError(t, err)
+		require.Equal(t, 1, repo.updateCalls)
+	}
+	repo := &mockUserRepo{getByIDUser: &User{ID: 7, Role: RoleUser}}
+	svc := NewUserService(repo, &mockUserSettingRepo{getMultipleErr: errors.New("policy offline")}, nil, nil)
+	_, err := svc.UpdateProfile(context.Background(), 7, UpdateProfileRequest{Username: &name})
+	require.ErrorIs(t, err, ErrServiceUnavailable)
+	require.Zero(t, repo.updateCalls)
 }
 
 func (m *mockUserSettingRepo) SetMultiple(context.Context, map[string]string) error {

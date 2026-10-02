@@ -771,7 +771,7 @@ func (r *userRepository) UpsertUserAvatar(ctx context.Context, userID int64, inp
 
 	_, err = exec.ExecContext(ctx, `
 INSERT INTO user_avatars (user_id, storage_provider, storage_key, url, content_type, byte_size, sha256, updated_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP)
 ON CONFLICT (user_id) DO UPDATE SET
 	storage_provider = EXCLUDED.storage_provider,
 	storage_key = EXCLUDED.storage_key,
@@ -779,7 +779,7 @@ ON CONFLICT (user_id) DO UPDATE SET
 	content_type = EXCLUDED.content_type,
 	byte_size = EXCLUDED.byte_size,
 	sha256 = EXCLUDED.sha256,
-	updated_at = NOW()`,
+	updated_at = CURRENT_TIMESTAMP`,
 		userID,
 		strings.TrimSpace(input.StorageProvider),
 		strings.TrimSpace(input.StorageKey),

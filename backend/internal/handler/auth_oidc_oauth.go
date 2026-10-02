@@ -21,6 +21,7 @@ import (
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/casdoor"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/oauth"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
@@ -92,6 +93,7 @@ type oidcUserInfoClaims struct {
 	EmailVerified *bool
 	DisplayName   string
 	AvatarURL     string
+	AvatarPresent bool
 }
 
 type oidcJWKSet struct {
@@ -384,7 +386,20 @@ func (h *AuthHandler) OIDCOAuthCallback(c *gin.Context) {
 		}(),
 		oidcFallbackUsername(subject),
 	)
-	if h.trySSOOIDCCallback(c, frontendCallback, redirectTo, intent, issuer, subject, compatEmail, username, emailVerified) {
+	var avatarURL *string
+	// Casdoor omits an empty picture in a complete OIDC profile response.
+	// A response without profile claims must not clear an existing avatar.
+	if userInfoClaims.AvatarPresent || userInfoClaims.DisplayName != "" {
+		avatarURL = &userInfoClaims.AvatarURL
+	}
+	name := ""
+	if idClaims != nil {
+		name = idClaims.Name
+	}
+	if h.trySSOOIDCCallback(c, frontendCallback, redirectTo, intent, issuer, &casdoor.Identity{
+		Subject: subject, Email: compatEmail, EmailVerified: emailVerified != nil && *emailVerified,
+		Username: username, DisplayName: firstNonEmpty(userInfoClaims.DisplayName, name, username), AvatarURL: avatarURL,
+	}) {
 		return
 	}
 	identityRef := service.PendingAuthIdentityKey{
@@ -922,14 +937,13 @@ func oidcParseUserInfo(body string, cfg config.OIDCConnectConfig) *oidcUserInfoC
 		getGJSON(body, "preferred_username"),
 		getGJSON(body, "username"),
 	)
-	claims.AvatarURL = firstNonEmpty(
-		getGJSON(body, "picture"),
-		getGJSON(body, "avatar_url"),
-		getGJSON(body, "avatar"),
-		getGJSON(body, "profile_image_url"),
-		getGJSON(body, "user.avatar"),
-		getGJSON(body, "user.avatar_url"),
-	)
+	for _, path := range []string{"picture", "avatar_url", "avatar", "profile_image_url", "user.avatar", "user.avatar_url"} {
+		value := gjson.Get(body, path)
+		if value.Type == gjson.String {
+			claims.AvatarPresent = true
+			claims.AvatarURL = firstNonEmpty(claims.AvatarURL, value.String())
+		}
+	}
 	claims.Email = strings.TrimSpace(claims.Email)
 	claims.Username = strings.TrimSpace(claims.Username)
 	claims.Subject = strings.TrimSpace(claims.Subject)

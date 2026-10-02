@@ -196,7 +196,7 @@ func TestSSOSettingsDependenciesAndFailClosed(t *testing.T) {
 	require.Error(t, validateSSOSettings(&SystemSettings{SSORegistrationEnabled: true}))
 	require.NoError(t, validateSSOSettings(&SystemSettings{}))
 	require.NoError(t, validateSSOSettings(&SystemSettings{SSOEnabled: true, OIDCConnectEnabled: true, OIDCConnectIssuerURL: "https://auth.example"}))
-	require.Equal(t, "https://auth.example/login/kano", svc.settings.ssoAccountURL(repo.values))
+	require.Equal(t, "https://auth.example/account", svc.settings.ssoAccountURL(repo.values))
 	require.Equal(t, "https://auth.example/forget/sub2api", svc.settings.ssoPasswordResetURL(repo.values))
 	repo.values[SettingKeySSOOrganization] = "another-org"
 	repo.values[SettingKeySSOApplication] = "admin/another-app"

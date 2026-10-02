@@ -4,6 +4,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"testing"
@@ -16,6 +17,68 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/stretchr/testify/require"
 )
+
+type ssoProfileSettings struct{ service.SettingRepository }
+
+func (ssoProfileSettings) GetMultiple(context.Context, []string) (map[string]string, error) {
+	return map[string]string{service.SettingKeySSOOnlyEnabled: "true"}, nil
+}
+
+type failingSSOAvatarRepo struct{ service.UserRepository }
+
+func (r failingSSOAvatarRepo) UpsertUserAvatar(ctx context.Context, id int64, input service.UpsertUserAvatarInput) (*service.UserAvatar, error) {
+	if _, err := r.UserRepository.UpsertUserAvatar(ctx, id, input); err != nil {
+		return nil, err
+	}
+	return nil, errors.New("simulated failure after writing the avatar")
+}
+
+func TestSSOProfileSyncUsesOnePostgresTransaction(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	repo := NewUserRepository(integrationEntClient, integrationDB)
+	settings := service.NewSettingService(ssoProfileSettings{}, nil)
+	cfg := &config.Config{}
+	svc := service.NewAuthService(integrationEntClient, repo, nil, nil, cfg, settings, nil, nil, nil, nil, nil, nil, nil)
+	user := &service.User{Email: fmt.Sprintf("sso-profile-%d@example.com", time.Now().UnixNano()),
+		PasswordHash: "hash", Role: service.RoleUser, Status: service.StatusActive, Username: "Original", Balance: 42, Concurrency: 7}
+	require.NoError(t, repo.Create(ctx, user))
+	t.Cleanup(func() {
+		_, _ = integrationDB.ExecContext(context.Background(), "DELETE FROM users WHERE id = $1", user.ID)
+	})
+	subject := fmt.Sprintf("profile-%d", user.ID)
+	_, err := integrationEntClient.AuthIdentity.Create().SetUserID(user.ID).SetProviderType("oidc").
+		SetProviderKey("https://auth.example").SetProviderSubject(subject).Save(ctx)
+	require.NoError(t, err)
+	avatar := "https://auth.example/profile.png"
+	identity := &casdoor.Identity{Subject: subject, DisplayName: "Passport nickname", AvatarURL: &avatar}
+	resolved, err := svc.ResolveSSOIdentity(ctx, "https://auth.example", identity)
+	require.NoError(t, err)
+	require.Equal(t, user.ID, resolved.ID)
+	require.Equal(t, "Passport nickname", resolved.Username)
+	require.Equal(t, avatar, resolved.AvatarURL)
+	stored, err := repo.GetByID(ctx, user.ID)
+	require.NoError(t, err)
+	require.Equal(t, 42.0, stored.Balance)
+	require.Equal(t, 7, stored.Concurrency)
+	require.Equal(t, user.Email, stored.Email)
+	failing := service.NewAuthService(integrationEntClient, failingSSOAvatarRepo{repo}, nil, nil, cfg, settings, nil, nil, nil, nil, nil, nil, nil)
+	nextAvatar := "https://auth.example/rolled-back.png"
+	_, err = failing.ResolveSSOIdentity(ctx, "https://auth.example", &casdoor.Identity{Subject: subject, DisplayName: "Must roll back", AvatarURL: &nextAvatar})
+	require.ErrorIs(t, err, service.ErrServiceUnavailable)
+	stored, err = repo.GetByID(ctx, user.ID)
+	require.NoError(t, err)
+	require.Equal(t, "Passport nickname", stored.Username)
+	storedAvatar, err := repo.GetUserAvatar(ctx, user.ID)
+	require.NoError(t, err)
+	require.Equal(t, avatar, storedAvatar.URL)
+	blank := ""
+	_, err = svc.ResolveSSOIdentity(ctx, "https://auth.example", &casdoor.Identity{Subject: subject, AvatarURL: &blank})
+	require.NoError(t, err)
+	storedAvatar, err = repo.GetUserAvatar(ctx, user.ID)
+	require.NoError(t, err)
+	require.Nil(t, storedAvatar)
+}
 
 func TestSSOConcurrentProvisioningUsesOneAccountAndOneInitialGrant(t *testing.T) {
 	ctx := context.Background()

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
+	"github.com/Wei-Shaw/sub2api/ent/authidentity"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/casdoor"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 )
@@ -25,7 +26,7 @@ func (s *AuthService) ResolveSSOIdentity(ctx context.Context, issuer string, ide
 		if !user.IsActive() || user.DeletedAt != nil {
 			return nil, ErrUserNotActive
 		}
-		return user, nil
+		return s.syncSSOProfile(ctx, issuer, user, identity)
 	}
 	if !identity.EmailVerified {
 		return nil, infraerrors.Forbidden("SSO_EMAIL_NOT_VERIFIED", "Verify your email in kano Passport before signing in")
@@ -43,7 +44,7 @@ func (s *AuthService) ResolveSSOIdentity(ctx context.Context, issuer string, ide
 			if !bound.IsActive() || bound.DeletedAt != nil {
 				return nil, ErrUserNotActive
 			}
-			return bound, nil
+			return s.syncSSOProfile(ctx, issuer, bound, identity)
 		}
 		return nil, ErrSSOIdentityConflict
 	} else if lookupErr != nil && !errors.Is(lookupErr, ErrUserNotFound) {
@@ -83,7 +84,7 @@ func (s *AuthService) createSSOUser(ctx context.Context, issuer, email string, i
 			// A concurrent SSO request can win the insert; only its identical subject is reusable.
 			existing, lookupErr := s.findEmailOAuthIdentityOwner(ctx, "oidc", issuer, identity.Subject)
 			if lookupErr == nil && existing != nil && existing.IsActive() {
-				return existing, nil
+				return s.syncSSOProfile(ctx, issuer, existing, identity)
 			}
 			return nil, ErrSSOIdentityConflict
 		}
@@ -105,11 +106,108 @@ func (s *AuthService) createSSOUser(ctx context.Context, issuer, email string, i
 			}
 		}
 	}
+	if _, err := s.syncSSOProfile(txCtx, issuer, user, identity); err != nil {
+		return nil, err
+	}
 	if err := tx.Commit(); err != nil {
 		return nil, ErrServiceUnavailable
 	}
 	_ = s.snapshotPlatformQuotaDefaults(ctx, user.ID, &plan)
 	s.bindOAuthAffiliate(ctx, user.ID, "")
+	return user, nil
+}
+
+// syncSSOProfile updates only the profile owned by the Passport. Account identity,
+// billing and access settings remain local, and administrators keep local editing.
+func (s *AuthService) syncSSOProfile(ctx context.Context, issuer string, user *User, identity *casdoor.Identity) (*User, error) {
+	if user.IsAdmin() || s.settingService == nil {
+		return user, nil
+	}
+	policy, err := s.settingService.GetSSOSettings(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if !policy.OnlyEnabled {
+		return user, nil
+	}
+	name := ""
+	if firstNonEmpty(identity.DisplayName, identity.Username) != "" {
+		name = ssoDisplayName(identity)
+	}
+	avatarURL := identity.AvatarURL
+	var avatarInput UpsertUserAvatarInput
+	if avatarURL != nil && strings.TrimSpace(*avatarURL) != "" {
+		avatarInput, err = normalizeUserAvatarInput(*avatarURL)
+		if err != nil {
+			// A malformed optional picture must not erase a valid avatar or block sign-in.
+			avatarURL = nil
+		}
+	}
+	if name == "" && avatarURL == nil {
+		return user, nil
+	}
+	tx := dbent.TxFromContext(ctx)
+	ownTx := tx == nil
+	if ownTx {
+		tx, err = s.entClient.Tx(ctx)
+		if err != nil {
+			return nil, ErrServiceUnavailable
+		}
+		defer func() { _ = tx.Rollback() }()
+		ctx = dbent.NewTxContext(ctx, tx)
+	}
+	bound, err := tx.AuthIdentity.Query().Where(authidentity.UserIDEQ(user.ID),
+		authidentity.ProviderTypeEQ("oidc"), authidentity.ProviderKeyEQ(issuer), authidentity.ProviderSubjectEQ(identity.Subject)).Only(ctx)
+	if err != nil {
+		return nil, ErrServiceUnavailable
+	}
+	metadata := make(map[string]any, len(bound.Metadata)+2)
+	for key, value := range bound.Metadata {
+		metadata[key] = value
+	}
+	metadataChanged := false
+	if name != "" {
+		if user.Username != name {
+			if _, err := tx.User.UpdateOneID(user.ID).SetUsername(name).Save(ctx); err != nil {
+				return nil, ErrServiceUnavailable
+			}
+			user.Username = name
+		}
+		metadataChanged = metadata["display_name"] != name
+		metadata["display_name"] = name
+	}
+	if avatarURL != nil {
+		avatar, err := s.userRepo.GetUserAvatar(ctx, user.ID)
+		if err != nil {
+			return nil, ErrServiceUnavailable
+		}
+		if strings.TrimSpace(*avatarURL) == "" {
+			if avatar != nil {
+				if err := s.userRepo.DeleteUserAvatar(ctx, user.ID); err != nil {
+					return nil, ErrServiceUnavailable
+				}
+			}
+			avatar = nil
+		} else if avatar == nil || avatar.URL != avatarInput.URL {
+			avatar, err = s.userRepo.UpsertUserAvatar(ctx, user.ID, avatarInput)
+			if err != nil {
+				return nil, ErrServiceUnavailable
+			}
+		}
+		applyUserAvatar(user, avatar)
+		metadataChanged = metadataChanged || metadata["avatar_url"] != user.AvatarURL
+		metadata["avatar_url"] = user.AvatarURL
+	}
+	if metadataChanged {
+		if _, err := tx.AuthIdentity.UpdateOneID(bound.ID).SetMetadata(metadata).Save(ctx); err != nil {
+			return nil, ErrServiceUnavailable
+		}
+	}
+	if ownTx {
+		if err := tx.Commit(); err != nil {
+			return nil, ErrServiceUnavailable
+		}
+	}
 	return user, nil
 }
 

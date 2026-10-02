@@ -109,5 +109,9 @@ func (s *SettingService) ssoManagementURLs(settings map[string]string) (string, 
 		return "", ""
 	}
 	base := strings.TrimRight(issuer, "/")
-	return base + "/login/" + url.PathEscape(organization), base + "/forget/" + url.PathEscape(parts[1])
+	accountURL := base + "/login/" + url.PathEscape(organization)
+	if organization == "kano" {
+		accountURL = base + "/account"
+	}
+	return accountURL, base + "/forget/" + url.PathEscape(parts[1])
 }

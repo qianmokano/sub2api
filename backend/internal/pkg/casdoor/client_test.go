@@ -58,6 +58,19 @@ func TestClientPasswordLoginAndRegistration(t *testing.T) {
 	require.Equal(t, account.Subject, identity.Subject)
 }
 
+func TestIdentityDistinguishesMissingAndRemovedAvatar(t *testing.T) {
+	for _, tc := range []struct {
+		body    string
+		present bool
+	}{
+		{`{"id":"user"}`, false}, {`{"avatar":null}`, false}, {`{"avatar":""}`, true},
+	} {
+		var identity Identity
+		require.NoError(t, json.Unmarshal([]byte(tc.body), &identity))
+		require.Equal(t, tc.present, identity.AvatarURL != nil)
+	}
+}
+
 func TestClientMFARetryPreservesRotatedCookie(t *testing.T) {
 	attempt := 0
 	mux := http.NewServeMux()

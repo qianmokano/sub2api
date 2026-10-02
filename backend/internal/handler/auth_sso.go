@@ -159,7 +159,7 @@ func (h *AuthHandler) finishSSOLogin(c *gin.Context, user *service.User) {
 }
 
 // OIDC and password authentication share the authoritative subject resolver and local MFA gate.
-func (h *AuthHandler) trySSOOIDCCallback(c *gin.Context, frontend, redirect, intent, issuer, subject, email, name string, verified *bool) bool {
+func (h *AuthHandler) trySSOOIDCCallback(c *gin.Context, frontend, redirect, intent, issuer string, identity *casdoor.Identity) bool {
 	if h.settingSvc == nil {
 		return false
 	}
@@ -181,9 +181,7 @@ func (h *AuthHandler) trySSOOIDCCallback(c *gin.Context, frontend, redirect, int
 	}
 	var user *service.User
 	if err == nil {
-		user, err = h.authService.ResolveSSOIdentity(c.Request.Context(), policy.Config.Issuer, &casdoor.Identity{
-			Subject: subject, Email: email, EmailVerified: verified != nil && *verified, DisplayName: name,
-		})
+		user, err = h.authService.ResolveSSOIdentity(c.Request.Context(), policy.Config.Issuer, identity)
 	}
 	if err == nil {
 		err = ensureLoginUserActive(user)
