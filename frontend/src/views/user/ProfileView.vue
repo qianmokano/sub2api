@@ -69,7 +69,9 @@ const { t } = useI18n()
 const appStore = useAppStore()
 const authStore = useAuthStore()
 const user = computed(() => authStore.user)
-const managedCredentials = computed(() => appStore.cachedPublicSettings?.sso_only_enabled === true && !authStore.isAdmin)
+const policyLoaded = ref(false)
+const policyFailed = ref(false)
+const managedCredentials = computed(() => !authStore.isAdmin && (!policyLoaded.value || policyFailed.value || appStore.cachedPublicSettings?.sso_only_enabled !== false))
 const ssoAccountURL = computed(() => appStore.cachedPublicSettings?.sso_account_url || '')
 
 const contactInfo = ref('')
@@ -92,6 +94,7 @@ onMounted(async () => {
   const settingsLoad = appStore.fetchPublicSettings()
     .then((settings) => {
       if (!settings) {
+        policyFailed.value = true
         return
       }
       contactInfo.value = settings.contact_info || ''
@@ -111,8 +114,10 @@ onMounted(async () => {
       passkeyEnabled.value = settings.passkey_enabled === true
     })
     .catch((error) => {
+      policyFailed.value = true
       console.error('Failed to load settings:', error)
     })
+    .finally(() => { policyLoaded.value = true })
 
   await Promise.all([profileRefresh, settingsLoad])
 })

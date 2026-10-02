@@ -379,6 +379,7 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 		CustomEndpoints:                        settings[SettingKeyCustomEndpoints],
 		BackendModeEnabled:                     settings[SettingKeyBackendModeEnabled] == "true",
 		SSOEnabled:                             settings[SettingKeySSOEnabled] == "true",
+		SSOAdminURL:                            s.ssoAdminURL(settings),
 		SSOOnlyEnabled:                         settings[SettingKeySSOOnlyEnabled] == "true",
 		SSORegistrationEnabled:                 settings[SettingKeySSORegistrationEnabled] == "true",
 		SSOOrganization:                        firstNonEmpty(settings[SettingKeySSOOrganization], "kano"),

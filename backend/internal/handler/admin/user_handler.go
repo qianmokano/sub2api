@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -17,6 +18,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gin-gonic/gin/binding"
 )
 
 // UserWithConcurrency wraps AdminUser with current concurrency info
@@ -277,6 +279,10 @@ func (h *UserHandler) Create(c *gin.Context) {
 		response.BadRequest(c, "Invalid request: "+err.Error())
 		return
 	}
+	if err := h.settingService.RequireLocalUserIdentity(c.Request.Context(), req.Role, ""); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
 
 	// 创建管理员账号属权限敏感操作：需最近完成 step-up 2FA 验证。
 	if req.Role == service.RoleAdmin {
@@ -316,9 +322,28 @@ func (h *UserHandler) Update(c *gin.Context) {
 	}
 
 	var req UpdateUserRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
+	if err := c.ShouldBindBodyWith(&req, binding.JSON); err != nil {
 		response.BadRequest(c, "Invalid request: "+err.Error())
 		return
+	}
+	var fields map[string]json.RawMessage
+	if body, ok := c.Get(gin.BodyBytesKey); ok {
+		_ = json.Unmarshal(body.([]byte), &fields)
+	}
+	for _, name := range []string{"email", "password", "username", "avatar_url", "avatar", "email_verified", "email_verified_at", "auth_bindings", "auth_identities"} {
+		if _, supplied := fields[name]; !supplied {
+			continue
+		}
+		target, err := h.adminService.GetUser(c.Request.Context(), userID)
+		if err != nil {
+			response.ErrorFrom(c, err)
+			return
+		}
+		if err := h.settingService.RequireLocalUserIdentity(c.Request.Context(), target.Role, req.Role); err != nil {
+			response.ErrorFrom(c, err)
+			return
+		}
+		break
 	}
 
 	// 防锁死保护：管理员不能把自己降级为普通用户(单管理员场景下会失去后台访问权)。

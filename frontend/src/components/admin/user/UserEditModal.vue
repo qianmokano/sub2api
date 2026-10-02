@@ -6,11 +6,16 @@
     @close="$emit('close')"
   >
     <form v-if="user" id="edit-user-form" @submit.prevent="handleUpdateUser" class="space-y-5">
+      <div v-if="managedIdentity" class="rounded-lg bg-primary-50 p-4 text-sm dark:bg-primary-950" data-testid="managed-customer-identity">
+        <p>{{ t('auth.sso.adminCustomerHint') }}</p>
+        <a v-if="identityPolicy.adminURL.value" :href="identityPolicy.adminURL.value" target="_blank" rel="noopener noreferrer" class="mt-2 inline-block text-primary-600">{{ t('auth.sso.managePolicy') }}</a>
+      </div>
+      <p v-if="identityPolicy.failed.value" class="text-sm text-red-600">{{ t('auth.sso.policyUnavailable') }}</p>
       <div>
         <label class="input-label">{{ t('admin.users.email') }}</label>
-        <input v-model="form.email" type="email" class="input" />
+        <input v-model="form.email" type="email" class="input" :disabled="managedIdentity" />
       </div>
-      <div>
+      <div v-if="!managedIdentity">
         <label class="input-label">{{ t('admin.users.password') }}</label>
         <div class="flex gap-2">
           <div class="relative flex-1">
@@ -27,7 +32,7 @@
       </div>
       <div>
         <label class="input-label">{{ t('admin.users.username') }}</label>
-        <input v-model="form.username" type="text" class="input" />
+        <input v-model="form.username" type="text" class="input" :disabled="managedIdentity" />
       </div>
       <div>
         <label class="input-label">{{ t('admin.users.form.roleLabel') }}</label>
@@ -71,7 +76,7 @@
     <template #footer>
       <div class="flex justify-end gap-3">
         <button @click="$emit('close')" type="button" class="btn btn-secondary">{{ t('common.cancel') }}</button>
-        <button type="submit" form="edit-user-form" :disabled="submitting" class="btn btn-primary">
+        <button type="submit" form="edit-user-form" :disabled="submitting || !identityPolicy.ready.value" class="btn btn-primary">
           {{ submitting ? t('admin.users.updating') : t('common.update') }}
         </button>
       </div>
@@ -95,10 +100,14 @@ import UserAttributeForm from '@/components/user/UserAttributeForm.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { useStepUp, isStepUpBlocked, isStepUpCancelled, stepUpBlockReason } from '@/composables/useStepUp'
 import TotpStepUpDialog from '@/components/auth/TotpStepUpDialog.vue'
+import { useAdminIdentityPolicy } from '@/composables/useAdminIdentityPolicy'
 
 const props = defineProps<{ show: boolean, user: AdminUser | null }>()
 const emit = defineEmits(['close', 'success'])
 const { t } = useI18n(); const appStore = useAppStore(); const { copyToClipboard } = useClipboard()
+const identityPolicy = useAdminIdentityPolicy()
+const managedIdentity = computed(() => identityPolicy.onlyEnabled.value && (props.user?.role !== 'admin' || form.role === 'user'))
+watch(() => props.show, (show) => { if (show) void identityPolicy.load() }, { immediate: true })
 
 const submitting = ref(false); const passwordCopied = ref(false)
 const roleOptions = computed(() => [
@@ -136,6 +145,7 @@ const copyPassword = async () => {
 const stepUp = useStepUp()
 
 const handleUpdateUser = async () => {
+  if (!identityPolicy.ready.value) return
   if (!props.user) return
   if (!form.email.trim()) {
     appStore.showError(t('admin.users.emailRequired'))
@@ -149,8 +159,12 @@ const handleUpdateUser = async () => {
   const userId = props.user.id
   submitting.value = true
   try {
-    const data: any = { email: form.email, username: form.username, notes: form.notes, role: form.role, concurrency: form.concurrency, rpm_limit: form.rpm_limit }
-    if (form.password.trim()) data.password = form.password.trim()
+    const data: any = { notes: form.notes, role: form.role, concurrency: form.concurrency, rpm_limit: form.rpm_limit }
+    if (!managedIdentity.value) {
+      data.email = form.email
+      data.username = form.username
+      if (form.password.trim()) data.password = form.password.trim()
+    }
     // 提升为管理员属敏感操作：后端返回 STEP_UP_REQUIRED 时弹 TOTP 验证并重试
     await stepUp.run(() => adminAPI.users.update(userId, data))
     if (Object.keys(form.customAttributes).length > 0) await adminAPI.userAttributes.updateUserAttributeValues(userId, form.customAttributes)

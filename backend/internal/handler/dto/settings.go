@@ -33,6 +33,7 @@ type SystemSettings struct {
 	SSORegistrationEnabled              bool                     `json:"sso_registration_enabled"`
 	SSOOrganization                     string                   `json:"sso_organization"`
 	SSOApplication                      string                   `json:"sso_application"`
+	SSOAdminURL                         string                   `json:"sso_admin_url"`
 	RegistrationEnabled                 bool                     `json:"registration_enabled"`
 	EmailVerifyEnabled                  bool                     `json:"email_verify_enabled"`
 	RegistrationEmailSuffixWhitelist    []string                 `json:"registration_email_suffix_whitelist"`

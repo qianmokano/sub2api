@@ -109,6 +109,24 @@ describe('ProfileView', () => {
     wrapper.unmount()
   })
 
+  it.each([null, 'reject'])('keeps customer identity editing closed after a policy failure (%s)', async (failure) => {
+    if (failure === 'reject') fetchPublicSettingsMock.mockRejectedValue(new Error('offline'))
+    else fetchPublicSettingsMock.mockResolvedValue(null)
+    const wrapper = mount(ProfileView, {
+      global: { stubs: {
+        AppLayout: { template: '<div><slot /></div>' },
+        ProfileInfoCard: { props: ['managedCredentials'], template: '<div data-testid="profile-policy" :data-managed="managedCredentials" />' },
+        ProfilePasswordForm: { template: '<div data-testid="local-password" />' },
+        ProfileTotpCard: true, ProfilePasskeyCard: true, ProfileBalanceNotifyCard: true, Icon: true,
+      } },
+    })
+    expect(wrapper.find('[data-testid="local-password"]').exists()).toBe(false)
+    await flushPromises()
+    expect(wrapper.get('[data-testid="profile-policy"]').attributes('data-managed')).toBe('true')
+    expect(wrapper.find('[data-testid="local-password"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
   it('renders the simplified single-column profile shell without separate stat cards', async () => {
     const wrapper = mount(ProfileView, {
       global: {

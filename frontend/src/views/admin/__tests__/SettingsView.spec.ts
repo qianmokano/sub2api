@@ -366,6 +366,9 @@ const ImageUploadStub = defineComponent({
 });
 
 const baseSettingsResponse = {
+  sso_only_enabled: false,
+  sso_enabled: false,
+  sso_admin_url: '',
   registration_enabled: true,
   email_verify_enabled: false,
   registration_email_suffix_whitelist: [],
@@ -720,6 +723,28 @@ describe("admin SettingsView payment visible method controls", () => {
     fetchPublicSettings.mockResolvedValue(undefined);
     adminSettingsFetch.mockResolvedValue(undefined);
   });
+
+  it('hides local registration controls, retains administrator safety and keeps saved local rules', async () => {
+    getSettings.mockResolvedValue({
+      ...baseSettingsResponse, sso_enabled: true, sso_only_enabled: true,
+      sso_admin_url: 'https://auth.example/login/built-in', registration_enabled: false,
+      registration_email_suffix_whitelist: ['example.com'], invitation_code_enabled: true,
+    })
+    const wrapper = mountView()
+    await flushPromises()
+    await openSecurityTab(wrapper)
+    expect(wrapper.get('[data-testid="passport-registration-settings"] a').attributes('href')).toBe('https://auth.example/login/built-in')
+    expect(wrapper.text()).not.toContain('admin.settings.registration.enableRegistrationHint')
+    expect(wrapper.find('[data-testid="administrator-email-verification"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="passkey-settings"]').exists()).toBe(false)
+    await wrapper.find('form').trigger('submit.prevent')
+    await flushPromises()
+    const payload = updateSettings.mock.calls[0]?.[0]
+    expect(payload).toBeDefined()
+    for (const key of ['registration_enabled', 'registration_email_suffix_whitelist', 'invitation_code_enabled', 'promo_code_enabled', 'password_reset_enabled', 'passkey_enabled']) expect(payload).not.toHaveProperty(key)
+    expect(payload.sso_only_enabled).toBe(true)
+    wrapper.unmount()
+  })
 
   it("loads and saves the open button visibility for each custom menu", async () => {
     const menuItems = [
