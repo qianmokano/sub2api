@@ -5,14 +5,19 @@ import ProfileView from '@/views/user/ProfileView.vue'
 const {
   fetchPublicSettingsMock,
   refreshUserMock,
-  authState
+  authState,
+  appState
 } = vi.hoisted(() => ({
   fetchPublicSettingsMock: vi.fn(),
   refreshUserMock: vi.fn(),
   authState: {
     user: null as Record<string, unknown> | null,
+    isAdmin: false,
     refreshUser: vi.fn()
-  }
+  },
+  appState: {
+    cachedPublicSettings: { sso_only_enabled: false, sso_account_url: '' },
+  },
 }))
 
 vi.mock('@/stores/auth', () => ({
@@ -21,6 +26,7 @@ vi.mock('@/stores/auth', () => ({
 
 vi.mock('@/stores/app', () => ({
   useAppStore: () => ({
+    ...appState,
     fetchPublicSettings: fetchPublicSettingsMock
   })
 }))
@@ -45,6 +51,8 @@ describe('ProfileView', () => {
     fetchPublicSettingsMock.mockReset()
     refreshUserMock.mockResolvedValue(undefined)
     authState.refreshUser = refreshUserMock
+    authState.isAdmin = false
+    appState.cachedPublicSettings = { sso_only_enabled: false, sso_account_url: '' }
     authState.user = {
       id: 1,
       username: 'alice',
@@ -71,6 +79,34 @@ describe('ProfileView', () => {
       oidc_oauth_enabled: true,
       oidc_oauth_provider_name: 'OIDC'
     })
+  })
+
+  it.each([false, true])('keeps business notifications and the administrator editing exception (admin=%s)', async (isAdmin) => {
+    authState.isAdmin = isAdmin
+    appState.cachedPublicSettings = { sso_only_enabled: true, sso_account_url: 'https://auth.example/account' }
+    fetchPublicSettingsMock.mockResolvedValue({ balance_low_notify_enabled: true })
+    const wrapper = mount(ProfileView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          ProfileInfoCard: {
+            props: ['managedCredentials', 'ssoAccountUrl'],
+            template: '<div data-testid="profile-info-card" :data-managed="managedCredentials" :data-account-url="ssoAccountUrl" />',
+          },
+          ProfileBalanceNotifyCard: { template: '<div data-testid="profile-balance-notify-card" />' },
+          ProfilePasswordForm: { template: '<div data-testid="profile-password-form" />' },
+          ProfileTotpCard: { template: '<div data-testid="profile-totp-card" />' },
+          ProfilePasskeyCard: true,
+          Icon: true,
+        },
+      },
+    })
+    await flushPromises()
+    expect(wrapper.get('[data-testid="profile-info-card"]').attributes('data-managed')).toBe(String(!isAdmin))
+    expect(wrapper.get('[data-testid="profile-info-card"]').attributes('data-account-url')).toBe('https://auth.example/account')
+    expect(wrapper.find('[data-testid="profile-password-form"]').exists()).toBe(isAdmin)
+    expect(wrapper.get('[data-testid="profile-balance-notify-card"]').exists()).toBe(true)
+    wrapper.unmount()
   })
 
   it('renders the simplified single-column profile shell without separate stat cards', async () => {

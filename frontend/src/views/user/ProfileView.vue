@@ -14,6 +14,7 @@
         :wechat-open-enabled="wechatOAuthOpenEnabled"
         :wechat-mp-enabled="wechatOAuthMPEnabled"
         :managed-credentials="managedCredentials"
+        :sso-account-url="ssoAccountURL"
       />
 
       <div
@@ -33,8 +34,7 @@
         </div>
       </div>
 
-      <a v-if="managedCredentials" :href="ssoAccountURL" class="card block p-6 font-medium text-primary-600">{{ t('auth.sso.manageAccount') }}</a>
-      <ProfilePasswordForm v-else />
+      <ProfilePasswordForm v-if="!managedCredentials" />
 
       <ProfileBalanceNotifyCard
         v-if="user && balanceLowNotifyEnabled"

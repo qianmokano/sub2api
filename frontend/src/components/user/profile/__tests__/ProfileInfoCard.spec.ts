@@ -71,6 +71,36 @@ function createUser(overrides: Partial<User> = {}): User {
 }
 
 describe('ProfileInfoCard', () => {
+  it('shows the Passport entry and read-only profile for managed users', () => {
+    const wrapper = mount(ProfileInfoCard, {
+      props: {
+        user: createUser({ username: 'Passport nickname', avatar_url: 'https://auth.example/avatar.png' }),
+        managedCredentials: true,
+        ssoAccountUrl: 'https://auth.example/account',
+      },
+      global: { stubs: { Icon: true } },
+    })
+    expect(wrapper.text()).toContain('Passport nickname')
+    expect(wrapper.get('[data-testid="profile-overview-hero"] img').attributes('src')).toBe('https://auth.example/avatar.png')
+    expect(wrapper.get('[data-testid="profile-passport-management"] a').attributes('href')).toBe('https://auth.example/account')
+    expect(wrapper.text()).toContain('auth.sso.profileManagedHint')
+    expect(wrapper.find('input').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="profile-auth-bindings-panel"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="profile-overview-metric-balance"]').text()).toContain('$10.00')
+    wrapper.unmount()
+  })
+
+  it('does not render a broken account link when its configuration is missing', () => {
+    const wrapper = mount(ProfileInfoCard, {
+      props: { user: createUser(), managedCredentials: true },
+      global: { stubs: { Icon: true } },
+    })
+    expect(wrapper.find('[data-testid="profile-passport-management"] a').exists()).toBe(false)
+    expect(wrapper.text()).toContain('auth.sso.accountUnavailable')
+    expect(wrapper.find('input').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
   it.each([
     { avatar_source: 'dingtalk', username_source: 'dingtalk' },
     { profile_sources: { avatar: { provider: 'dingtalk' }, username: { provider: 'dingtalk' } } },

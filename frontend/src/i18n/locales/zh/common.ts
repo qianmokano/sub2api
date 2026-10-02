@@ -219,7 +219,7 @@ export default {
   // Auth
   auth: {
     sso: {
-      title: 'kano 通行证', account: '邮箱或用户名', verification: '通行证二步验证', method: '验证方式', code: '验证码', verify: '验证并继续', sendCode: '发送验证码', codeSent: '验证码已发送，请查收邮箱', retryLogin: '通行证已创建，请使用同一账号登录', manageAccount: '前往 kano 通行证管理密码与二步验证', enabled: '启用页内统一登录', only: '仅允许统一登录（管理员保留本地应急入口）', registration: '允许通行证注册', organization: 'Casdoor 组织', application: 'Casdoor 应用（组织/应用）', settingsHint: '复用下方 OIDC issuer。统一注册独立于本站注册与邮箱策略；启用仅统一登录前，请确认管理员本地密码和二步验证可用。'
+      title: 'kano 通行证', account: '邮箱或用户名', verification: '通行证二步验证', method: '验证方式', code: '验证码', verify: '验证并继续', sendCode: '发送验证码', codeSent: '验证码已发送，请查收邮箱', retryLogin: '通行证已创建，请使用同一账号登录', manageAccount: '前往 kano 通行证管理账户', profileTitle: '账户资料与安全', profileManagedHint: '昵称、头像和密码由 kano 通行证统一管理。修改昵称或头像后，下次登录本网关时同步。', accountUnavailable: '通行证管理入口暂不可用，请联系管理员。', enabled: '启用页内统一登录', only: '仅允许统一登录（管理员保留本地应急入口）', registration: '允许通行证注册', organization: 'Casdoor 组织', application: 'Casdoor 应用（组织/应用）', settingsHint: '复用下方 OIDC issuer。统一注册独立于本站注册与邮箱策略；启用仅统一登录前，请确认管理员本地密码和二步验证可用。'
     },
     welcomeBack: '欢迎回来',
     signInToAccount: '登录您的账户以继续',
