@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"compress/zlib"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -21,6 +22,19 @@ const (
 	// to prevent decompression bomb attacks.
 	maxDecompressedBodySize = 64 << 20
 )
+
+// HasJSONField checks presence using the same case folding as encoding/json.
+// Values are intentionally ignored so explicit null is still a supplied field.
+func HasJSONField(fields map[string]json.RawMessage, names ...string) bool {
+	for key := range fields {
+		for _, name := range names {
+			if strings.EqualFold(key, name) {
+				return true
+			}
+		}
+	}
+	return false
+}
 
 // PrereadBody 回填已读取完成的请求体：作为 io.ReadCloser 可被再次顺序消费
 // （multipart 流式解析），同时暴露 Bytes() 让 ReadRequestBodyWithPrealloc

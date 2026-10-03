@@ -19,7 +19,7 @@ func TestAdminUserHTTPManagedIdentityRestrictions(t *testing.T) {
 	router := gin.New()
 	router.POST("/users", h.Create)
 	router.PUT("/users/:id", h.Update)
-	for _, field := range []string{"email", "password", "username", "avatar_url", "avatar", "email_verified", "email_verified_at", "auth_bindings", "auth_identities", "nickname", "display_name", "oauth_identities", "identities", "identity_bindings", "Username", "AVATAR_URL", "Email"} {
+	for _, field := range []string{"email", "password", "username", "avatar_url", "avatar", "email_verified", "email_verified_at", "auth_bindings", "auth_identities", "nickname", "display_name", "oauth_identities", "identities", "identity_bindings", "Username", "AVATAR_URL", "Email", "paſſword", "uſername"} {
 		t.Run(field, func(t *testing.T) {
 			payload := map[string]any{field: nil, "notes": "must not save"}
 			rec := doJSON(t, router, http.MethodPut, "/users/1", payload)
