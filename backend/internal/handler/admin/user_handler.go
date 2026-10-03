@@ -327,8 +327,9 @@ func (h *UserHandler) Update(c *gin.Context) {
 		return
 	}
 	var fields map[string]json.RawMessage
-	if body, ok := c.Get(gin.BodyBytesKey); ok {
-		_ = json.Unmarshal(body.([]byte), &fields)
+	if err := c.ShouldBindBodyWith(&fields, binding.JSON); err != nil {
+		response.BadRequest(c, "Invalid request")
+		return
 	}
 	for _, name := range []string{"email", "password", "username", "avatar_url", "avatar", "email_verified", "email_verified_at", "auth_bindings", "auth_identities"} {
 		if _, supplied := fields[name]; !supplied {
