@@ -118,17 +118,18 @@ func normalizeUserRole(role, fallback string) (string, error) {
 }
 
 func (s *adminServiceImpl) CreateUser(ctx context.Context, input *CreateUserInput) (*User, error) {
+	role, err := normalizeUserRole(input.Role, RoleUser)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.settingService.RequireLocalUserIdentity(ctx, role, ""); err != nil {
+		return nil, err
+	}
 	balance := 0.0
 	if input.Balance != nil {
 		balance = *input.Balance
 	} else if s.settingService != nil {
 		balance = s.settingService.GetDefaultBalance(ctx)
-	}
-
-	// 角色可由管理员在创建时指定(admin/user);未提供时默认 user。
-	role, err := normalizeUserRole(input.Role, RoleUser)
-	if err != nil {
-		return nil, err
 	}
 
 	user := &User{
@@ -207,6 +208,11 @@ func (s *adminServiceImpl) UpdateUser(ctx context.Context, id int64, input *Upda
 	user, err := s.userRepo.GetByID(ctx, id)
 	if err != nil {
 		return nil, err
+	}
+	if input.Email != "" || input.Password != "" || input.Username != nil {
+		if err := s.settingService.RequireLocalUserIdentity(ctx, user.Role, input.Role); err != nil {
+			return nil, err
+		}
 	}
 
 	// Protect admin users: cannot disable admin accounts
@@ -912,11 +918,18 @@ func (s *adminServiceImpl) BindUserAuthIdentity(ctx context.Context, userID int6
 	if userID <= 0 {
 		return nil, infraerrors.BadRequest("INVALID_INPUT", "user_id must be greater than 0")
 	}
-	if s == nil || s.entClient == nil || s.userRepo == nil {
+	if s == nil || s.userRepo == nil {
 		return nil, infraerrors.InternalServer("ADMIN_AUTH_IDENTITY_BIND_UNAVAILABLE", "auth identity binding service is unavailable")
 	}
-	if _, err := s.userRepo.GetByID(ctx, userID); err != nil {
+	user, err := s.userRepo.GetByID(ctx, userID)
+	if err != nil {
 		return nil, err
+	}
+	if err := s.settingService.RequireLocalUserIdentity(ctx, user.Role, ""); err != nil {
+		return nil, err
+	}
+	if s.entClient == nil {
+		return nil, infraerrors.InternalServer("ADMIN_AUTH_IDENTITY_BIND_UNAVAILABLE", "auth identity binding service is unavailable")
 	}
 
 	providerType := normalizeAdminAuthIdentityProviderType(input.ProviderType)

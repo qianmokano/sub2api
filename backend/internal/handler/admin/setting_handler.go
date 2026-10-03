@@ -219,6 +219,7 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 		SSORegistrationEnabled:                                 settings.SSORegistrationEnabled,
 		SSOOrganization:                                        settings.SSOOrganization,
 		SSOApplication:                                         settings.SSOApplication,
+		SSOAdminURL:                                            settings.SSOAdminURL,
 		OIDCConnectEnabled:                                     settings.OIDCConnectEnabled,
 		OIDCConnectProviderName:                                settings.OIDCConnectProviderName,
 		OIDCConnectClientID:                                    settings.OIDCConnectClientID,

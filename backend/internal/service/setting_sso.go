@@ -94,6 +94,36 @@ func (s *SettingService) ssoPasswordResetURL(settings map[string]string) string 
 	return reset
 }
 
+func (s *SettingService) ssoAdminURL(settings map[string]string) string {
+	account, _ := s.ssoManagementURLs(settings)
+	if account == "" {
+		return ""
+	}
+	u, _ := url.Parse(account)
+	u.Path, u.RawPath = "/login/built-in", ""
+	return u.String()
+}
+
+// RequireLocalUserIdentity preserves administrator recovery and checks the
+// current role before a proposed role change can bypass customer management.
+func (s *SettingService) RequireLocalUserIdentity(ctx context.Context, currentRole, nextRole string) error {
+	if currentRole == RoleAdmin && nextRole != RoleUser {
+		return nil
+	}
+	// Settings are optional in legacy service fixtures; production injects them.
+	if s == nil {
+		return nil
+	}
+	policy, err := s.GetSSOSettings(ctx)
+	if err != nil {
+		return err
+	}
+	if policy.OnlyEnabled {
+		return ErrSSOOnly
+	}
+	return nil
+}
+
 func (s *SettingService) ssoManagementURLs(settings map[string]string) (string, string) {
 	issuer := settings[SettingKeyOIDCConnectIssuerURL]
 	if issuer == "" && s.cfg != nil {

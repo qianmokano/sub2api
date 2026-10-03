@@ -17,6 +17,7 @@ type SystemSettings struct {
 	SSORegistrationEnabled              bool
 	SSOOrganization                     string
 	SSOApplication                      string
+	SSOAdminURL                         string
 	RegistrationEnabled                 bool
 	EmailVerifyEnabled                  bool
 	RegistrationEmailSuffixWhitelist    []string

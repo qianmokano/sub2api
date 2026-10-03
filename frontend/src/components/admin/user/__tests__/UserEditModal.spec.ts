@@ -3,7 +3,8 @@ import { flushPromises, mount } from '@vue/test-utils'
 
 import UserEditModal from '../UserEditModal.vue'
 
-const { update, updateUserAttributeValues, showSuccess, showError } = vi.hoisted(() => ({
+const { getSettings, update, updateUserAttributeValues, showSuccess, showError } = vi.hoisted(() => ({
+  getSettings: vi.fn(),
   update: vi.fn(),
   updateUserAttributeValues: vi.fn(),
   showSuccess: vi.fn(),
@@ -12,6 +13,7 @@ const { update, updateUserAttributeValues, showSuccess, showError } = vi.hoisted
 
 vi.mock('@/api/admin', () => ({
   adminAPI: {
+    settings: { getSettings },
     users: { update },
     userAttributes: { updateUserAttributeValues }
   }
@@ -55,6 +57,8 @@ const mountModal = (concurrency: number) => mount(UserEditModal, {
 
 describe('UserEditModal concurrency', () => {
   beforeEach(() => {
+    getSettings.mockReset()
+    getSettings.mockResolvedValue({ sso_only_enabled: false })
     update.mockReset()
     updateUserAttributeValues.mockReset()
     showSuccess.mockReset()
@@ -68,6 +72,7 @@ describe('UserEditModal concurrency', () => {
   // it — doing so blocked every other edit on such a user.
   it('saves an unlimited (0) concurrency instead of blocking the whole form', async () => {
     const wrapper = mountModal(0)
+    await flushPromises()
 
     await wrapper.get('form').trigger('submit')
     await flushPromises()
@@ -79,12 +84,33 @@ describe('UserEditModal concurrency', () => {
 
   it('still rejects a negative concurrency', async () => {
     const wrapper = mountModal(3)
+    await flushPromises()
 
     await wrapper.get('[data-test="concurrency-input"]').setValue('-1')
     await wrapper.get('form').trigger('submit')
     await flushPromises()
 
     expect(showError).toHaveBeenCalledWith('admin.users.concurrencyNonNegative')
+    expect(update).not.toHaveBeenCalled()
+  })
+
+  it('keeps managed identity read-only and submits only gateway business fields', async () => {
+    getSettings.mockResolvedValue({ sso_only_enabled: true, sso_admin_url: 'https://auth.example/login/built-in' })
+    const wrapper = mountModal(0)
+    await flushPromises()
+    expect(wrapper.get('[data-testid="managed-customer-identity"] a').attributes('href')).toBe('https://auth.example/login/built-in')
+    expect(wrapper.get('input[type="email"]').attributes('disabled')).toBeDefined()
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(update).toHaveBeenCalledWith(7, { notes: '', role: 'user', concurrency: 0, rpm_limit: 0 })
+  })
+
+  it('does not submit edits when the policy cannot be loaded', async () => {
+    getSettings.mockRejectedValue(new Error('offline'))
+    const wrapper = mountModal(0)
+    await flushPromises()
+    expect(wrapper.text()).toContain('auth.sso.policyUnavailable')
+    await wrapper.get('form').trigger('submit')
     expect(update).not.toHaveBeenCalled()
   })
 })

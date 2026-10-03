@@ -219,6 +219,19 @@ export default {
   // Auth
   auth: {
     sso: {
+      registrationManagedTitle: '注册与账户由 Kano 通行证管理',
+      registrationManagedHint: '客户的注册、邮箱规则、资料、密码和双重验证由通行证管理。本网关保留业务权限与首次建号权益；页内注册开关只控制本网关入口，不会关闭通行证全站注册。',
+      managePolicy: '前往通行证后台管理',
+      frontendURL: '本站公开地址（用于回调与跳转）',
+      localSecurityTitle: '本站管理员安全',
+      localSecurityHint: '本地密码与二步验证用于本站管理员和恢复入口。普通客户的双重验证在通行证设置；下列开关不修改通行证策略。',
+      localEmailVerification: '本站管理员邮箱确认',
+      localEmailVerificationHint: '控制本站本地二步验证操作的邮箱确认方式，不控制通行证注册或邮箱验证。',
+      adminCustomerHint: '客户身份资料由 Kano 通行证管理，此处只读。状态、备注、并发和额度等网关业务设置仍可修改。',
+      customerCreationHint: '普通客户在通行证注册，首次登录本网关时自动建立业务账号。本站只允许手动创建本地管理员。',
+      createAdministrator: '创建本地管理员',
+      policyUnavailable: '账户管理策略加载失败，请重试后再编辑。',
+      registrationEntry: '允许在本网关页面注册通行证',
       title: 'kano 通行证', account: '邮箱或用户名', verification: '通行证二步验证', method: '验证方式', code: '验证码', verify: '验证并继续', sendCode: '发送验证码', codeSent: '验证码已发送，请查收邮箱', retryLogin: '通行证已创建，请使用同一账号登录', manageAccount: '前往 kano 通行证管理账户', profileTitle: '账户资料与安全', profileManagedHint: '昵称、头像和密码由 kano 通行证统一管理。修改昵称或头像后，下次登录本网关时同步。', accountUnavailable: '通行证管理入口暂不可用，请联系管理员。', enabled: '启用页内统一登录', only: '仅允许统一登录（管理员保留本地应急入口）', registration: '允许通行证注册', organization: 'Casdoor 组织', application: 'Casdoor 应用（组织/应用）', settingsHint: '复用下方 OIDC issuer。统一注册独立于本站注册与邮箱策略；启用仅统一登录前，请确认管理员本地密码和二步验证可用。'
     },
     welcomeBack: '欢迎回来',

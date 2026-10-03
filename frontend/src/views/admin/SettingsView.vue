@@ -1424,18 +1424,26 @@
         <!-- Tab: Security — Registration, Turnstile, LinuxDo -->
         <div v-show="activeTab === 'security'" class="space-y-6">
           <!-- Registration Settings -->
-          <div class="card">
+          <div v-if="identityPolicyReady && !loadFailed && form.sso_only_enabled" class="card p-6" data-testid="passport-registration-settings">
+            <h2 class="text-lg font-semibold">{{ t('auth.sso.registrationManagedTitle') }}</h2>
+            <p class="mt-2 text-sm text-gray-500">{{ t('auth.sso.registrationManagedHint') }}</p>
+            <a v-if="form.sso_admin_url" :href="form.sso_admin_url" target="_blank" rel="noopener noreferrer" class="btn btn-primary mt-4">{{ t('auth.sso.managePolicy') }}</a>
+            <p v-else class="mt-3 text-sm text-gray-500">{{ t('auth.sso.accountUnavailable') }}</p>
+            <label class="input-label mt-5">{{ t('auth.sso.frontendURL') }}<input v-model="form.frontend_url" class="input mt-1" /></label>
+          </div>
+          <div v-if="identityPolicyReady && !loadFailed" class="card">
             <div
               class="border-b border-gray-100 px-6 py-4 dark:border-dark-700"
             >
               <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
-                {{ t("admin.settings.registration.title") }}
+                {{ form.sso_only_enabled ? t('auth.sso.localSecurityTitle') : t("admin.settings.registration.title") }}
               </h2>
               <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                {{ t("admin.settings.registration.description") }}
+                {{ form.sso_only_enabled ? t('auth.sso.localSecurityHint') : t("admin.settings.registration.description") }}
               </p>
             </div>
             <div class="space-y-5 p-6">
+              <template v-if="!form.sso_only_enabled">
               <!-- Enable Registration -->
               <div class="flex items-center justify-between">
                 <div>
@@ -1619,6 +1627,14 @@
                 </p>
               </div>
 
+              </template>
+              <div v-if="form.sso_only_enabled" class="flex items-center justify-between" data-testid="administrator-email-verification">
+                <div>
+                  <label class="font-medium">{{ t('auth.sso.localEmailVerification') }}</label>
+                  <p class="text-sm text-gray-500">{{ t('auth.sso.localEmailVerificationHint') }}</p>
+                </div>
+                <Toggle v-model="form.email_verify_enabled" />
+              </div>
               <!-- TOTP 2FA -->
               <div
                 class="flex items-center justify-between border-t border-gray-100 pt-4 dark:border-dark-700"
@@ -1648,6 +1664,7 @@
               <div
                 class="border-t border-gray-100 pt-4 dark:border-dark-700"
                 data-testid="passkey-settings"
+                v-if="!form.sso_only_enabled"
               >
                 <div class="flex items-start justify-between gap-4">
                   <div>
@@ -3445,7 +3462,7 @@
                   <p class="text-sm text-gray-500">{{ t('auth.sso.settingsHint') }}</p>
                   <div class="flex items-center justify-between"><span>{{ t('auth.sso.enabled') }}</span><Toggle :model-value="form.sso_enabled === true" @update:model-value="form.sso_enabled = $event" /></div>
                   <div class="flex items-center justify-between"><span>{{ t('auth.sso.only') }}</span><Toggle :model-value="form.sso_only_enabled === true" :disabled="!form.sso_enabled" @update:model-value="form.sso_only_enabled = $event" /></div>
-                  <div class="flex items-center justify-between"><span>{{ t('auth.sso.registration') }}</span><Toggle :model-value="form.sso_registration_enabled === true" :disabled="!form.sso_enabled" @update:model-value="form.sso_registration_enabled = $event" /></div>
+                  <div class="flex items-center justify-between"><span>{{ t('auth.sso.registrationEntry') }}</span><Toggle :model-value="form.sso_registration_enabled === true" :disabled="!form.sso_enabled" @update:model-value="form.sso_registration_enabled = $event" /></div>
                   <label class="input-label">{{ t('auth.sso.organization') }}<input v-model="form.sso_organization" class="input mt-1" /></label>
                   <label class="input-label">{{ t('auth.sso.application') }}<input v-model="form.sso_application" class="input mt-1" /></label>
                 </div>
@@ -8478,7 +8495,7 @@
 
         <div v-show="activeTab === 'email'" class="space-y-6">
           <!-- Email disabled hint - show when email_verify_enabled is off -->
-          <div v-if="!form.email_verify_enabled" class="card">
+          <div v-if="!form.email_verify_enabled && !form.sso_only_enabled" class="card">
             <div class="p-6">
               <div class="flex items-start gap-3">
                 <Icon
@@ -8499,7 +8516,7 @@
           </div>
 
           <!-- SMTP Settings - Only show when email verification is enabled -->
-          <div v-if="form.email_verify_enabled" class="card">
+          <div v-if="form.email_verify_enabled || form.sso_only_enabled" class="card">
             <div
               class="flex items-center justify-between border-b border-gray-100 px-6 py-4 dark:border-dark-700"
             >
@@ -8662,7 +8679,7 @@
           </div>
 
           <!-- Send Test Email - Only show when email verification is enabled -->
-          <div v-if="form.email_verify_enabled" class="card">
+          <div v-if="form.email_verify_enabled || form.sso_only_enabled" class="card">
             <div
               class="border-b border-gray-100 px-6 py-4 dark:border-dark-700"
             >
@@ -9159,6 +9176,7 @@ const { copyToClipboard } = useClipboard();
 
 const loading = ref(true);
 const loadFailed = ref(false);
+const identityPolicyReady = ref(false);
 const saving = ref(false);
 const testingSmtp = ref(false);
 const sendingTestEmail = ref(false);
@@ -9924,6 +9942,7 @@ const form = reactive<SettingsForm>({
   sso_registration_enabled: false,
   sso_organization: 'kano',
   sso_application: 'admin/sub2api',
+  sso_admin_url: '',
   oidc_connect_provider_name: "OIDC",
   oidc_connect_client_id: "",
   oidc_connect_client_secret: "",
@@ -11031,6 +11050,7 @@ async function loadSettings() {
   loadFailed.value = false;
   try {
     const settings = await adminAPI.settings.getSettings();
+    identityPolicyReady.value = typeof settings.sso_only_enabled === 'boolean';
     settings.payment_load_balance_strategy =
       settings.payment_load_balance_strategy || "round-robin";
     // Only assign non-null values from backend (null means unconfigured, keep defaults)
@@ -11818,6 +11838,18 @@ async function saveSettings() {
       form.account_scheduling_thresholds,
     );
     appendAuthSourceDefaultsToUpdateRequest(payload, authSourceDefaults);
+
+    // Hidden local controls must retain their stored values, including exact
+    // whitelist syntax, when an unrelated gateway setting is saved.
+    if (form.sso_only_enabled) {
+      delete payload.registration_enabled;
+      delete payload.registration_email_suffix_whitelist;
+      delete payload.registration_email_domain_quota_enabled;
+      delete payload.promo_code_enabled;
+      delete payload.invitation_code_enabled;
+      delete payload.password_reset_enabled;
+      delete payload.passkey_enabled;
+    }
 
     const updated = await settingsStepUp.run(() =>
       adminAPI.settings.updateSettings(payload),

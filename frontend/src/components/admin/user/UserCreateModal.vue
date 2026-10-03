@@ -1,11 +1,16 @@
 <template>
   <BaseDialog
     :show="show"
-    :title="t('admin.users.createUser')"
+    :title="identityPolicy.onlyEnabled.value ? t('auth.sso.createAdministrator') : t('admin.users.createUser')"
     width="normal"
     @close="$emit('close')"
   >
-    <form id="create-user-form" @submit.prevent="submit" class="space-y-5">
+    <p v-if="identityPolicy.failed.value" class="text-sm text-red-600">{{ t('auth.sso.policyUnavailable') }}</p>
+    <div v-if="identityPolicy.ready.value && identityPolicy.onlyEnabled.value" class="mb-4 rounded-lg bg-primary-50 p-4 text-sm dark:bg-primary-950" data-testid="passport-customer-creation">
+      <p>{{ t('auth.sso.customerCreationHint') }}</p>
+      <a v-if="identityPolicy.adminURL.value" :href="identityPolicy.adminURL.value" target="_blank" rel="noopener noreferrer" class="mt-2 inline-block text-primary-600">{{ t('auth.sso.managePolicy') }}</a>
+    </div>
+    <form v-if="identityPolicy.ready.value" id="create-user-form" @submit.prevent="submit" class="space-y-5">
       <div>
         <label class="input-label">{{ t('admin.users.email') }}</label>
         <input v-model="form.email" type="email" required class="input" :placeholder="t('admin.users.enterEmail')" />
@@ -28,7 +33,7 @@
       <div>
         <label class="input-label">{{ t('admin.users.form.roleLabel') }}</label>
         <select v-model="form.role" class="input">
-          <option value="user">{{ t('admin.users.roles.user') }}</option>
+          <option v-if="!identityPolicy.onlyEnabled.value" value="user">{{ t('admin.users.roles.user') }}</option>
           <option value="admin">{{ t('admin.users.roles.admin') }}</option>
         </select>
       </div>
@@ -58,7 +63,7 @@
     <template #footer>
       <div class="flex justify-end gap-3">
         <button @click="$emit('close')" type="button" class="btn btn-secondary">{{ t('common.cancel') }}</button>
-        <button type="submit" form="create-user-form" :disabled="loading" class="btn btn-primary">
+        <button type="submit" form="create-user-form" :disabled="loading || !identityPolicy.ready.value" class="btn btn-primary">
           {{ loading ? t('admin.users.creating') : t('common.create') }}
         </button>
       </div>
@@ -77,10 +82,12 @@ import BaseDialog from '@/components/common/BaseDialog.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { useStepUp, isStepUpBlocked, isStepUpCancelled, stepUpBlockReason } from '@/composables/useStepUp'
 import TotpStepUpDialog from '@/components/auth/TotpStepUpDialog.vue'
+import { useAdminIdentityPolicy } from '@/composables/useAdminIdentityPolicy'
 
 const props = defineProps<{ show: boolean }>()
 const emit = defineEmits(['close', 'success']); const { t } = useI18n()
 const appStore = useAppStore()
+const identityPolicy = useAdminIdentityPolicy()
 
 const form = reactive({ email: '', password: '', username: '', notes: '', role: 'user' as 'user' | 'admin', balance: '', concurrency: 1, rpm_limit: 0 })
 
@@ -88,7 +95,7 @@ const stepUp = useStepUp()
 const loading = ref(false)
 
 const submit = async () => {
-  if (loading.value) return
+  if (loading.value || !identityPolicy.ready.value) return
   loading.value = true
   try {
     const { balance: rawBalance, ...rest } = { ...form }
@@ -116,7 +123,11 @@ const submit = async () => {
   } finally { loading.value = false }
 }
 
-watch(() => props.show, (v) => { if(v) Object.assign(form, { email: '', password: '', username: '', notes: '', role: 'user', balance: '', concurrency: 1, rpm_limit: 0 }) })
+watch(() => props.show, async (show) => {
+  if (!show) return
+  await identityPolicy.load()
+  Object.assign(form, { email: '', password: '', username: '', notes: '', role: identityPolicy.onlyEnabled.value ? 'admin' : 'user', balance: '', concurrency: 1, rpm_limit: 0 })
+}, { immediate: true })
 
 const generateRandomPassword = () => {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#$%^&*'

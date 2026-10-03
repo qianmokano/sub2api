@@ -403,6 +403,7 @@ export interface SystemSettings {
   sso_registration_enabled?: boolean;
   sso_organization?: string;
   sso_application?: string;
+  sso_admin_url?: string;
   // Registration settings
   registration_enabled: boolean;
   email_verify_enabled: boolean;
