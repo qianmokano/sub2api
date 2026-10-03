@@ -331,8 +331,10 @@ func (h *UserHandler) Update(c *gin.Context) {
 		response.BadRequest(c, "Invalid request")
 		return
 	}
-	for _, name := range []string{"email", "password", "username", "avatar_url", "avatar", "email_verified", "email_verified_at", "auth_bindings", "auth_identities"} {
-		if _, supplied := fields[name]; !supplied {
+	for key := range fields {
+		switch strings.ToLower(key) {
+		case "nickname", "display_name", "email", "password", "username", "avatar_url", "avatar", "email_verified", "email_verified_at", "auth_bindings", "auth_identities", "oauth_identities", "identities", "identity_bindings":
+		default:
 			continue
 		}
 		target, err := h.adminService.GetUser(c.Request.Context(), userID)
