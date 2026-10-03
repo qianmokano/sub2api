@@ -4,12 +4,56 @@ import (
 	"bytes"
 	"compress/gzip"
 	"compress/zlib"
+	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
 
 	"github.com/klauspost/compress/zstd"
 )
+
+func TestHasJSONFieldMatchesJSONDecoder(t *testing.T) {
+	for _, tc := range []struct {
+		name, body string
+		want       bool
+	}{
+		{"canonical null", `{"username":null}`, true},
+		{"ASCII case", `{"Username":"value"}`, true},
+		{"Unicode long s", `{"uſername":null}`, true},
+		{"Unicode password", `{"paſſword":null}`, true},
+		{"Unicode Kelvin", `{"nicKname":null}`, true},
+		{"false value", `{"AVATAR_URL":false}`, true},
+		{"case duplicate null", `{"username":"value","USERNAME":null}`, true},
+		{"business only", `{"balance_notify_enabled":false}`, false},
+		{"no trimming", `{" username ":null}`, false},
+		{"different Unicode letter", `{"nıckname":null}`, false},
+		{"empty", `{}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var fields map[string]json.RawMessage
+			var decoded struct {
+				Username  json.RawMessage `json:"username"`
+				Nickname  json.RawMessage `json:"nickname"`
+				Password  json.RawMessage `json:"password"`
+				AvatarURL json.RawMessage `json:"avatar_url"`
+			}
+			if err := json.Unmarshal([]byte(tc.body), &fields); err != nil {
+				t.Fatal(err)
+			}
+			if err := json.Unmarshal([]byte(tc.body), &decoded); err != nil {
+				t.Fatal(err)
+			}
+			bound := decoded.Username != nil || decoded.Nickname != nil || decoded.Password != nil || decoded.AvatarURL != nil
+			got := HasJSONField(fields, "username", "nickname", "password", "avatar_url")
+			if got != tc.want || got != bound {
+				t.Fatalf("present=%v decoder=%v want=%v", got, bound, tc.want)
+			}
+		})
+	}
+	if HasJSONField(nil, "username") || HasJSONField(map[string]json.RawMessage{"username": nil}) {
+		t.Fatal("missing fields or names must not match")
+	}
+}
 
 const samplePayload = `{"model":"gpt-5.5","input":"hi","stream":false}`
 

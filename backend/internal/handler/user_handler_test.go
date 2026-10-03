@@ -209,7 +209,7 @@ func (s *userProfileSettingRepoStub) GetMultiple(context.Context, []string) (map
 
 func TestUserHandlerUpdateProfileRejectsManagedIdentityPresence(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	for _, field := range []string{"nickname", "display_name", "username", "email", "password", "avatar", "avatar_url", "email_verified", "email_verified_at", "auth_bindings", "auth_identities", "oauth_identities", "identities", "identity_bindings", "Username", "AVATAR_URL", "Email"} {
+	for _, field := range []string{"nickname", "display_name", "username", "email", "password", "avatar", "avatar_url", "email_verified", "email_verified_at", "auth_bindings", "auth_identities", "oauth_identities", "identities", "identity_bindings", "Username", "AVATAR_URL", "Email", "uſername", "nicKname"} {
 		t.Run(field, func(t *testing.T) {
 			repo := &userHandlerRepoStub{user: &service.User{ID: 11, Role: service.RoleUser, Username: "Passport", Balance: 12, BalanceNotifyEnabled: true}}
 			settings := &userProfileSettingRepoStub{values: map[string]string{service.SettingKeySSOOnlyEnabled: "true"}}
