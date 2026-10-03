@@ -85,9 +85,10 @@ func (m *mockUserSettingRepo) GetMultiple(_ context.Context, keys []string) (map
 }
 
 func TestUpdateProfile_ManagedIdentityFieldsAreReadOnly(t *testing.T) {
-	name, avatar, threshold := "Changed", "https://example.com/avatar.png", 10.0
+	name, avatar, email, threshold := "Changed", "https://example.com/avatar.png", "changed@example.com", 10.0
 	for _, req := range []UpdateProfileRequest{
 		{Username: &name}, {AvatarURL: &avatar}, {Username: &name, BalanceNotifyThreshold: &threshold},
+		{Email: &email}, {IdentityFieldsPresent: true}, {IdentityFieldsPresent: true, BalanceNotifyThreshold: &threshold},
 	} {
 		repo := &mockUserRepo{getByIDUser: &User{ID: 7, Role: RoleUser, Username: "Original", Concurrency: 3}}
 		svc := NewUserService(repo, &mockUserSettingRepo{values: map[string]string{SettingKeySSOOnlyEnabled: "true"}}, nil, nil)
@@ -107,6 +108,8 @@ func TestUpdateProfile_ManagedModeKeepsNotificationsAndAdminEditing(t *testing.T
 		{RoleUser, "true", UpdateProfileRequest{BalanceNotifyThreshold: &threshold}},
 		{RoleAdmin, "true", UpdateProfileRequest{Username: &name}},
 		{RoleUser, "false", UpdateProfileRequest{Username: &name}},
+		{RoleAdmin, "true", UpdateProfileRequest{IdentityFieldsPresent: true, BalanceNotifyThreshold: &threshold}},
+		{RoleUser, "false", UpdateProfileRequest{IdentityFieldsPresent: true, BalanceNotifyThreshold: &threshold}},
 	} {
 		repo := &mockUserRepo{getByIDUser: &User{ID: 7, Role: tc.role, Username: "Original", Concurrency: 3}}
 		svc := NewUserService(repo, &mockUserSettingRepo{values: map[string]string{SettingKeySSOOnlyEnabled: tc.only}}, nil, nil)
@@ -117,6 +120,9 @@ func TestUpdateProfile_ManagedModeKeepsNotificationsAndAdminEditing(t *testing.T
 	repo := &mockUserRepo{getByIDUser: &User{ID: 7, Role: RoleUser}}
 	svc := NewUserService(repo, &mockUserSettingRepo{getMultipleErr: errors.New("policy offline")}, nil, nil)
 	_, err := svc.UpdateProfile(context.Background(), 7, UpdateProfileRequest{Username: &name})
+	require.ErrorIs(t, err, ErrServiceUnavailable)
+	require.Zero(t, repo.updateCalls)
+	_, err = svc.UpdateProfile(context.Background(), 7, UpdateProfileRequest{IdentityFieldsPresent: true, BalanceNotifyThreshold: &threshold})
 	require.ErrorIs(t, err, ErrServiceUnavailable)
 	require.Zero(t, repo.updateCalls)
 }

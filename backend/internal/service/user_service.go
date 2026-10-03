@@ -253,6 +253,8 @@ const (
 
 // UpdateProfileRequest 更新用户资料请求
 type UpdateProfileRequest struct {
+	// IdentityFieldsPresent preserves explicit null and identity aliases from HTTP requests.
+	IdentityFieldsPresent  bool     `json:"-"`
 	Email                  *string  `json:"email"`
 	Username               *string  `json:"username"`
 	AvatarURL              *string  `json:"avatar_url"`
@@ -501,7 +503,7 @@ func (s *UserService) updateProfile(ctx context.Context, userID int64, req Updat
 		return nil, 0, fmt.Errorf("get user: %w", err)
 	}
 	oldConcurrency := user.Concurrency
-	if !user.IsAdmin() && s.settingRepo != nil && (req.Username != nil || req.AvatarURL != nil) {
+	if !user.IsAdmin() && s.settingRepo != nil && (req.IdentityFieldsPresent || req.Email != nil || req.Username != nil || req.AvatarURL != nil) {
 		settings, err := s.settingRepo.GetMultiple(ctx, []string{SettingKeySSOOnlyEnabled})
 		if err != nil {
 			return nil, oldConcurrency, ErrServiceUnavailable

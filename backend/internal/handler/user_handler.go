@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gin-gonic/gin/binding"
 )
 
 // UserHandler handles user-related requests
@@ -168,8 +170,13 @@ func (h *UserHandler) UpdateProfile(c *gin.Context) {
 	}
 
 	var req UpdateProfileRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
+	if err := c.ShouldBindBodyWith(&req, binding.JSON); err != nil {
 		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	var fields map[string]json.RawMessage
+	if err := c.ShouldBindBodyWith(&fields, binding.JSON); err != nil {
+		response.BadRequest(c, "Invalid request")
 		return
 	}
 
@@ -178,6 +185,12 @@ func (h *UserHandler) UpdateProfile(c *gin.Context) {
 		AvatarURL:              req.AvatarURL,
 		BalanceNotifyEnabled:   req.BalanceNotifyEnabled,
 		BalanceNotifyThreshold: req.BalanceNotifyThreshold,
+	}
+	for key := range fields {
+		switch strings.ToLower(key) {
+		case "nickname", "display_name", "username", "email", "password", "avatar", "avatar_url", "email_verified", "email_verified_at", "auth_bindings", "auth_identities", "oauth_identities", "identities", "identity_bindings":
+			svcReq.IdentityFieldsPresent = true
+		}
 	}
 	updatedUser, err := h.userService.UpdateProfile(c.Request.Context(), subject.UserID, svcReq)
 	if err != nil {

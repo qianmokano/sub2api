@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -23,6 +24,7 @@ type userHandlerRepoStub struct {
 	user       *service.User
 	identities []service.UserAuthIdentityRecord
 	unbound    []string
+	updates    int
 }
 
 func (s *userHandlerRepoStub) Create(context.Context, *service.User) error { return nil }
@@ -42,6 +44,7 @@ func (s *userHandlerRepoStub) GetFirstAdmin(context.Context) (*service.User, err
 	return &cloned, nil
 }
 func (s *userHandlerRepoStub) Update(_ context.Context, user *service.User, _ service.UserUpdateFields) error {
+	s.updates++
 	cloned := *user
 	s.user = &cloned
 	return nil
@@ -192,6 +195,95 @@ func TestUserHandlerUpdateProfileReturnsAvatarURL(t *testing.T) {
 	require.Equal(t, 0, resp.Code)
 	require.Equal(t, "https://cdn.example.com/avatar.png", resp.Data.AvatarURL)
 	require.Equal(t, "handler-avatar", resp.Data.Username)
+}
+
+type userProfileSettingRepoStub struct {
+	service.SettingRepository
+	values map[string]string
+	err    error
+}
+
+func (s *userProfileSettingRepoStub) GetMultiple(context.Context, []string) (map[string]string, error) {
+	return s.values, s.err
+}
+
+func TestUserHandlerUpdateProfileRejectsManagedIdentityPresence(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, field := range []string{"nickname", "display_name", "username", "email", "password", "avatar", "avatar_url", "email_verified", "email_verified_at", "auth_bindings", "auth_identities", "oauth_identities", "identities", "identity_bindings", "Username", "AVATAR_URL", "Email"} {
+		t.Run(field, func(t *testing.T) {
+			repo := &userHandlerRepoStub{user: &service.User{ID: 11, Role: service.RoleUser, Username: "Passport", Balance: 12, BalanceNotifyEnabled: true}}
+			settings := &userProfileSettingRepoStub{values: map[string]string{service.SettingKeySSOOnlyEnabled: "true"}}
+			h := NewUserHandler(service.NewUserService(repo, settings, nil, nil), nil, nil, nil, nil, nil)
+			router := gin.New()
+			router.PUT("/user", func(c *gin.Context) {
+				c.Set(string(middleware2.ContextKeyUser), middleware2.AuthSubject{UserID: 11})
+				h.UpdateProfile(c)
+			})
+			for _, value := range []any{nil, "changed"} {
+				body, err := json.Marshal(map[string]any{field: value, "role": "admin", "balance_notify_enabled": false})
+				require.NoError(t, err)
+				rec := httptest.NewRecorder()
+				req := httptest.NewRequest(http.MethodPut, "/user", bytes.NewReader(body))
+				req.Header.Set("Content-Type", "application/json")
+				router.ServeHTTP(rec, req)
+				require.Equal(t, http.StatusForbidden, rec.Code)
+				require.Contains(t, rec.Body.String(), "SSO_ONLY")
+				require.Zero(t, repo.updates)
+				require.Equal(t, "Passport", repo.user.Username)
+				require.True(t, repo.user.BalanceNotifyEnabled)
+				require.Equal(t, service.RoleUser, repo.user.Role)
+				require.Equal(t, 12.0, repo.user.Balance)
+			}
+		})
+	}
+}
+
+func TestUserHandlerUpdateProfilePolicyAndBusinessRequests(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, tc := range []struct {
+		name, role, only, body string
+		settingsErr            error
+		status, updates        int
+		wantName               string
+		wantNotify             bool
+	}{
+		{"business only", service.RoleUser, "true", `{"balance_notify_enabled":false}`, nil, 200, 1, "Passport", false},
+		{"administrator", service.RoleAdmin, "true", `{"username":"Local admin","balance_notify_enabled":false}`, nil, 200, 1, "Local admin", false},
+		{"administrator null", service.RoleAdmin, "true", `{"username":null,"balance_notify_enabled":false}`, errors.New("offline"), 200, 1, "Passport", false},
+		{"local mode", service.RoleUser, "false", `{"username":"Local","balance_notify_enabled":false}`, nil, 200, 1, "Local", false},
+		{"local mode null", service.RoleUser, "false", `{"avatar_url":null,"balance_notify_enabled":false}`, nil, 200, 1, "Passport", false},
+		{"policy failure", service.RoleUser, "true", `{"username":null,"balance_notify_enabled":false}`, errors.New("offline"), 503, 0, "Passport", true},
+		{"business with unavailable identity policy", service.RoleUser, "true", `{"balance_notify_enabled":false}`, errors.New("offline"), 200, 1, "Passport", false},
+		{"malformed request", service.RoleUser, "true", `{`, nil, 400, 0, "Passport", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := &userHandlerRepoStub{user: &service.User{ID: 11, Role: tc.role, Username: "Passport", BalanceNotifyEnabled: true}}
+			settings := &userProfileSettingRepoStub{values: map[string]string{service.SettingKeySSOOnlyEnabled: tc.only}, err: tc.settingsErr}
+			h := NewUserHandler(service.NewUserService(repo, settings, nil, nil), nil, nil, nil, nil, nil)
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			c.Request = httptest.NewRequest(http.MethodPut, "/user", bytes.NewBufferString(tc.body))
+			c.Request.Header.Set("Content-Type", "application/json")
+			c.Set(string(middleware2.ContextKeyUser), middleware2.AuthSubject{UserID: 11})
+			h.UpdateProfile(c)
+			require.Equal(t, tc.status, rec.Code)
+			require.Equal(t, tc.updates, repo.updates)
+			require.Equal(t, tc.wantName, repo.user.Username)
+			require.Equal(t, tc.wantNotify, repo.user.BalanceNotifyEnabled)
+		})
+	}
+}
+
+func TestUserHandlerUpdateProfileRequiresAuthentication(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := &userHandlerRepoStub{user: &service.User{ID: 11, Role: service.RoleUser, Username: "Passport"}}
+	h := NewUserHandler(service.NewUserService(repo, nil, nil, nil), nil, nil, nil, nil, nil)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPut, "/user", bytes.NewBufferString(`{"username":null}`))
+	h.UpdateProfile(c)
+	require.Equal(t, http.StatusUnauthorized, rec.Code)
+	require.Zero(t, repo.updates)
 }
 
 func TestUserHandlerGetProfileReturnsIdentitySummaries(t *testing.T) {
