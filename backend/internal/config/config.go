@@ -486,14 +486,6 @@ func shouldApplyLegacyWeChatEnv(configKey, envKey string) bool {
 	return !hasNewEnv
 }
 
-func hasExplicitConfigOrEnv(configKey, envKey string) bool {
-	if viper.InConfig(configKey) {
-		return true
-	}
-	_, ok := os.LookupEnv(envKey)
-	return ok
-}
-
 func applyLegacyWeChatConnectEnvCompatibility(cfg *WeChatConnectConfig) {
 	if cfg == nil {
 		return

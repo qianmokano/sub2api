@@ -61,7 +61,7 @@ func fixture(t *testing.T, required bool, kind string) (*Client, *memoryStore) {
 			if r.URL.Query().Get("applicationId") != "admin/shop" || r.URL.Query().Get("isCurrentProvider") != "false" {
 				t.Error("request trusted a client-supplied application")
 			}
-			_ = json.NewEncoder(w).Encode(map[string]interface{}{"status": "ok", "data": map[string]string{
+			_ = json.NewEncoder(w).Encode(map[string]any{"status": "ok", "data": map[string]string{
 				"type": kind, "captchaId": "image-id", "captchaImage": "aW1hZ2U=", "clientId": "public-site-key", "clientSecret": "must-not-return",
 			}})
 		default:
@@ -99,7 +99,7 @@ func TestPrepareAndConsume(t *testing.T) {
 			if _, err = client.Resolve(context.Background(), ActionLogin, "alice@example.test", proof); !errors.Is(err, ErrChallenge) {
 				t.Fatal("replay accepted")
 			}
-			payload := map[string]interface{}{}
+			payload := map[string]any{}
 			fields.ApplyJSON(payload)
 			form := url.Values{}
 			fields.ApplyForm(form)

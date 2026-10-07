@@ -2711,10 +2711,6 @@ func boolSettingValue(v bool) string {
 	return "false"
 }
 
-func boolPtr(v bool) *bool {
-	return &v
-}
-
 type oauthPendingFlowSettingRepoStub struct {
 	values map[string]string
 }

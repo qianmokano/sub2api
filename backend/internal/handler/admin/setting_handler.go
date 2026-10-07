@@ -31,15 +31,6 @@ func generateMenuItemID() (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
-func scopesContainOpenID(scopes string) bool {
-	for _, scope := range strings.Fields(strings.ToLower(strings.TrimSpace(scopes))) {
-		if scope == "openid" {
-			return true
-		}
-	}
-	return false
-}
-
 func firstNonEmpty(values ...string) string {
 	for _, value := range values {
 		if trimmed := strings.TrimSpace(value); trimmed != "" {

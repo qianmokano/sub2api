@@ -105,7 +105,7 @@ func validRequest(config Config, action, account string) bool {
 	return u.Scheme == "https" || (u.Scheme == "http" && (u.Hostname() == "localhost" || u.Hostname() == "127.0.0.1" || u.Hostname() == "::1"))
 }
 
-func (c *Client) get(ctx context.Context, path string, query url.Values, out interface{}) error {
+func (c *Client) get(ctx context.Context, path string, query url.Values, out any) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.config.Issuer+path+"?"+query.Encode(), nil)
 	if err != nil {
 		return ErrUnavailable
@@ -230,7 +230,7 @@ func (c *Client) Resolve(ctx context.Context, action, account string, proof *Pro
 	return Fields{Type: record.Type, Token: proof.Answer, ImageID: record.ImageID}, nil
 }
 
-func (f Fields) ApplyJSON(payload map[string]interface{}) {
+func (f Fields) ApplyJSON(payload map[string]any) {
 	payload["captchaType"] = f.Type
 	payload["captchaToken"] = f.Token
 	if f.Type == "Default" {
