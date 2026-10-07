@@ -47,6 +47,50 @@ func TestApplySuggestedProfileToCompletionResponse(t *testing.T) {
 	require.Equal(t, true, payload["adoption_required"])
 }
 
+func TestPendingOAuthEndpointsRejectLegacyOIDCSessions(t *testing.T) {
+	handler, client := newOAuthPendingFlowTestHandler(t, false)
+	ctx := context.Background()
+	session, err := client.PendingAuthSession.Create().
+		SetSessionToken("removed-oidc-session").SetIntent("login").
+		SetProviderType("oidc").SetProviderKey("https://auth.example").
+		SetProviderSubject("existing-subject").SetBrowserSessionKey("browser").
+		SetLocalFlowState(map[string]any{oauthCompletionResponseKey: map[string]any{"access_token": "old-token"}}).
+		SetExpiresAt(time.Now().UTC().Add(time.Minute)).Save(ctx)
+	require.NoError(t, err)
+	users, err := client.User.Query().Count(ctx)
+	require.NoError(t, err)
+	for _, endpoint := range []struct {
+		path string
+		run  func(*gin.Context)
+	}{
+		{"exchange", handler.ExchangePendingOAuthCompletion},
+		{"send-verify-code", handler.SendPendingOAuthVerifyCode},
+		{"create-account", handler.CreatePendingOAuthAccount},
+		{"bind-login", handler.BindPendingOAuthLogin},
+	} {
+		t.Run(endpoint.path, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/auth/oauth/pending/"+endpoint.path, strings.NewReader(`{"email":"u@example.com","password":"password","email_code":"123456"}`))
+			c.Request.Header.Set("Content-Type", "application/json")
+			c.Request.AddCookie(&http.Cookie{Name: oauthPendingSessionCookieName, Value: encodeCookieValue(session.SessionToken)})
+			c.Request.AddCookie(&http.Cookie{Name: oauthPendingBrowserCookieName, Value: encodeCookieValue("browser")})
+			endpoint.run(c)
+			require.Equal(t, http.StatusNotFound, w.Code)
+			require.NotContains(t, w.Body.String(), "old-token")
+		})
+	}
+	count, err := client.User.Query().Count(ctx)
+	require.NoError(t, err)
+	require.Equal(t, users, count)
+	count, err = client.AuthIdentity.Query().Count(ctx)
+	require.NoError(t, err)
+	require.Zero(t, count)
+	stored, err := client.PendingAuthSession.Get(ctx, session.ID)
+	require.NoError(t, err)
+	require.Nil(t, stored.ConsumedAt)
+}
+
 func TestApplySuggestedProfileToCompletionResponseKeepsExistingPayloadValues(t *testing.T) {
 	payload := map[string]any{
 		"suggested_display_name": "Existing",
@@ -67,7 +111,7 @@ func TestApplySuggestedProfileToCompletionResponseKeepsExistingPayloadValues(t *
 func TestSetOAuthPendingSessionCookieUsesProviderCompletionPathPrefix(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	ginCtx, _ := gin.CreateTestContext(recorder)
-	ginCtx.Request = httptest.NewRequest(http.MethodGet, "/api/v1/auth/oauth/oidc/callback", nil)
+	ginCtx.Request = httptest.NewRequest(http.MethodGet, "/api/v1/auth/oauth/linuxdo/callback", nil)
 
 	setOAuthPendingSessionCookie(ginCtx, "pending-session-token", false)
 
@@ -1077,20 +1121,20 @@ func TestExchangePendingOAuthCompletionInvitationRequiredFalseFalsePersistsDecis
 	require.Nil(t, storedSession.ConsumedAt)
 }
 
-func TestCreateOIDCOAuthAccountCreatesUserBindsIdentityAndConsumesSession(t *testing.T) {
+func TestCreateLinuxDoOAuthAccountCreatesUserBindsIdentityAndConsumesSession(t *testing.T) {
 	handler, client := newOAuthPendingFlowTestHandlerWithEmailVerification(t, false, "fresh@example.com", "246810")
 	ctx := context.Background()
 
 	session, err := client.PendingAuthSession.Create().
 		SetSessionToken("create-account-session-token").
 		SetIntent("login").
-		SetProviderType("oidc").
+		SetProviderType("linuxdo").
 		SetProviderKey("https://issuer.example").
-		SetProviderSubject("oidc-create-123").
+		SetProviderSubject("linuxdo-create-123").
 		SetBrowserSessionKey("create-account-browser-session-key").
 		SetUpstreamIdentityClaims(map[string]any{
-			"username":               "oidc_user",
-			"suggested_display_name": "Fresh OIDC User",
+			"username":               "linuxdo_user",
+			"suggested_display_name": "Fresh LinuxDo User",
 			"suggested_avatar_url":   "https://cdn.example/fresh.png",
 		}).
 		SetRedirectTo("/profile").
@@ -1101,13 +1145,13 @@ func TestCreateOIDCOAuthAccountCreatesUserBindsIdentityAndConsumesSession(t *tes
 	body := bytes.NewBufferString(`{"email":"fresh@example.com","verify_code":"246810","password":"secret-123","adopt_display_name":false,"adopt_avatar":false}`)
 	recorder := httptest.NewRecorder()
 	ginCtx, _ := gin.CreateTestContext(recorder)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/oauth/oidc/create-account", body)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/oauth/linuxdo/create-account", body)
 	req.Header.Set("Content-Type", "application/json")
 	req.AddCookie(&http.Cookie{Name: oauthPendingSessionCookieName, Value: encodeCookieValue(session.SessionToken)})
 	req.AddCookie(&http.Cookie{Name: oauthPendingBrowserCookieName, Value: encodeCookieValue("create-account-browser-session-key")})
 	ginCtx.Request = req
 
-	handler.CreateOIDCOAuthAccount(ginCtx)
+	handler.CreateLinuxDoOAuthAccount(ginCtx)
 
 	require.Equal(t, http.StatusOK, recorder.Code)
 
@@ -1123,9 +1167,9 @@ func TestCreateOIDCOAuthAccountCreatesUserBindsIdentityAndConsumesSession(t *tes
 
 	identity, err := client.AuthIdentity.Query().
 		Where(
-			authidentity.ProviderTypeEQ("oidc"),
+			authidentity.ProviderTypeEQ("linuxdo"),
 			authidentity.ProviderKeyEQ("https://issuer.example"),
-			authidentity.ProviderSubjectEQ("oidc-create-123"),
+			authidentity.ProviderSubjectEQ("linuxdo-create-123"),
 		).
 		Only(ctx)
 	require.NoError(t, err)
@@ -1136,7 +1180,7 @@ func TestCreateOIDCOAuthAccountCreatesUserBindsIdentityAndConsumesSession(t *tes
 	require.NotNil(t, storedSession.ConsumedAt)
 }
 
-func TestCreateOIDCOAuthAccountAppliesPromoCodeFromPendingSession(t *testing.T) {
+func TestCreateLinuxDoOAuthAccountAppliesPromoCodeFromPendingSession(t *testing.T) {
 	promoRepo := newOAuthPendingFlowPromoRepoStub("WELCOME2024", 25)
 	emailCache := &oauthPendingFlowEmailCacheStub{
 		verificationCodes: map[string]*service.VerificationCodeData{
@@ -1160,9 +1204,9 @@ func TestCreateOIDCOAuthAccountAppliesPromoCodeFromPendingSession(t *testing.T) 
 	session, err := client.PendingAuthSession.Create().
 		SetSessionToken("promo-create-account-session-token").
 		SetIntent(oauthIntentLogin).
-		SetProviderType("oidc").
+		SetProviderType("linuxdo").
 		SetProviderKey("https://issuer.example").
-		SetProviderSubject("oidc-promo-123").
+		SetProviderSubject("linuxdo-promo-123").
 		SetBrowserSessionKey("promo-create-account-browser-key").
 		SetUpstreamIdentityClaims(map[string]any{"username": "promo_user"}).
 		SetLocalFlowState(map[string]any{oauthPromoCodeStateKey: "WELCOME2024"}).
@@ -1173,13 +1217,13 @@ func TestCreateOIDCOAuthAccountAppliesPromoCodeFromPendingSession(t *testing.T) 
 	body := bytes.NewBufferString(`{"email":"promo@example.com","verify_code":"246810","password":"secret-123"}`)
 	recorder := httptest.NewRecorder()
 	ginCtx, _ := gin.CreateTestContext(recorder)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/oauth/oidc/create-account", body)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/oauth/linuxdo/create-account", body)
 	req.Header.Set("Content-Type", "application/json")
 	req.AddCookie(&http.Cookie{Name: oauthPendingSessionCookieName, Value: encodeCookieValue(session.SessionToken)})
 	req.AddCookie(&http.Cookie{Name: oauthPendingBrowserCookieName, Value: encodeCookieValue(session.BrowserSessionKey)})
 	ginCtx.Request = req
 
-	handler.CreateOIDCOAuthAccount(ginCtx)
+	handler.CreateLinuxDoOAuthAccount(ginCtx)
 
 	require.Equal(t, http.StatusOK, recorder.Code)
 	require.Equal(t, []string{"WELCOME2024"}, promoRepo.applyCalls)
@@ -1190,7 +1234,7 @@ func TestCreateOIDCOAuthAccountAppliesPromoCodeFromPendingSession(t *testing.T) 
 	require.Equal(t, createdUser.ID, promoRepo.usages[0].UserID)
 }
 
-func TestCreateOIDCOAuthAccountWithoutPromoCodeDoesNotApplyPromo(t *testing.T) {
+func TestCreateLinuxDoOAuthAccountWithoutPromoCodeDoesNotApplyPromo(t *testing.T) {
 	promoRepo := newOAuthPendingFlowPromoRepoStub("WELCOME2024", 25)
 	emailCache := &oauthPendingFlowEmailCacheStub{
 		verificationCodes: map[string]*service.VerificationCodeData{
@@ -1214,9 +1258,9 @@ func TestCreateOIDCOAuthAccountWithoutPromoCodeDoesNotApplyPromo(t *testing.T) {
 	session, err := client.PendingAuthSession.Create().
 		SetSessionToken("no-promo-create-account-session-token").
 		SetIntent(oauthIntentLogin).
-		SetProviderType("oidc").
+		SetProviderType("linuxdo").
 		SetProviderKey("https://issuer.example").
-		SetProviderSubject("oidc-no-promo-123").
+		SetProviderSubject("linuxdo-no-promo-123").
 		SetBrowserSessionKey("no-promo-create-account-browser-key").
 		SetUpstreamIdentityClaims(map[string]any{"username": "no_promo_user"}).
 		SetExpiresAt(time.Now().UTC().Add(10 * time.Minute)).
@@ -1226,13 +1270,13 @@ func TestCreateOIDCOAuthAccountWithoutPromoCodeDoesNotApplyPromo(t *testing.T) {
 	body := bytes.NewBufferString(`{"email":"no-promo@example.com","verify_code":"246810","password":"secret-123"}`)
 	recorder := httptest.NewRecorder()
 	ginCtx, _ := gin.CreateTestContext(recorder)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/oauth/oidc/create-account", body)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/oauth/linuxdo/create-account", body)
 	req.Header.Set("Content-Type", "application/json")
 	req.AddCookie(&http.Cookie{Name: oauthPendingSessionCookieName, Value: encodeCookieValue(session.SessionToken)})
 	req.AddCookie(&http.Cookie{Name: oauthPendingBrowserCookieName, Value: encodeCookieValue(session.BrowserSessionKey)})
 	ginCtx.Request = req
 
-	handler.CreateOIDCOAuthAccount(ginCtx)
+	handler.CreateLinuxDoOAuthAccount(ginCtx)
 
 	require.Equal(t, http.StatusOK, recorder.Code)
 	require.Empty(t, promoRepo.applyCalls)
@@ -1241,7 +1285,7 @@ func TestCreateOIDCOAuthAccountWithoutPromoCodeDoesNotApplyPromo(t *testing.T) {
 	require.Zero(t, createdUser.Balance)
 }
 
-func TestCreateOIDCOAuthAccountDoesNotApplyPromoWhenDisabled(t *testing.T) {
+func TestCreateLinuxDoOAuthAccountDoesNotApplyPromoWhenDisabled(t *testing.T) {
 	promoRepo := newOAuthPendingFlowPromoRepoStub("WELCOME2024", 25)
 	emailCache := &oauthPendingFlowEmailCacheStub{
 		verificationCodes: map[string]*service.VerificationCodeData{
@@ -1265,9 +1309,9 @@ func TestCreateOIDCOAuthAccountDoesNotApplyPromoWhenDisabled(t *testing.T) {
 	session, err := client.PendingAuthSession.Create().
 		SetSessionToken("promo-disabled-session-token").
 		SetIntent(oauthIntentLogin).
-		SetProviderType("oidc").
+		SetProviderType("linuxdo").
 		SetProviderKey("https://issuer.example").
-		SetProviderSubject("oidc-promo-disabled-123").
+		SetProviderSubject("linuxdo-promo-disabled-123").
 		SetBrowserSessionKey("promo-disabled-browser-key").
 		SetUpstreamIdentityClaims(map[string]any{"username": "promo_disabled_user"}).
 		SetLocalFlowState(map[string]any{oauthPromoCodeStateKey: "WELCOME2024"}).
@@ -1278,13 +1322,13 @@ func TestCreateOIDCOAuthAccountDoesNotApplyPromoWhenDisabled(t *testing.T) {
 	body := bytes.NewBufferString(`{"email":"promo-disabled@example.com","verify_code":"246810","password":"secret-123"}`)
 	recorder := httptest.NewRecorder()
 	ginCtx, _ := gin.CreateTestContext(recorder)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/oauth/oidc/create-account", body)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/oauth/linuxdo/create-account", body)
 	req.Header.Set("Content-Type", "application/json")
 	req.AddCookie(&http.Cookie{Name: oauthPendingSessionCookieName, Value: encodeCookieValue(session.SessionToken)})
 	req.AddCookie(&http.Cookie{Name: oauthPendingBrowserCookieName, Value: encodeCookieValue(session.BrowserSessionKey)})
 	ginCtx.Request = req
 
-	handler.CreateOIDCOAuthAccount(ginCtx)
+	handler.CreateLinuxDoOAuthAccount(ginCtx)
 
 	require.Equal(t, http.StatusOK, recorder.Code)
 	require.Empty(t, promoRepo.applyCalls)
@@ -1320,7 +1364,7 @@ func TestOAuthExistingUserLoginDoesNotApplyPromoCode(t *testing.T) {
 		"",
 		"",
 		"WELCOME2024",
-		"oidc",
+		"linuxdo",
 	)
 
 	require.NoError(t, err)
@@ -1331,7 +1375,7 @@ func TestOAuthExistingUserLoginDoesNotApplyPromoCode(t *testing.T) {
 	require.Equal(t, 7.0, reloadedUser.Balance)
 }
 
-func TestCreateOIDCOAuthAccountExistingEmailReturnsChoicePendingSessionState(t *testing.T) {
+func TestCreateLinuxDoOAuthAccountExistingEmailReturnsChoicePendingSessionState(t *testing.T) {
 	handler, client := newOAuthPendingFlowTestHandlerWithEmailVerification(t, false, "owner@example.com", "135790")
 	ctx := context.Background()
 
@@ -1347,13 +1391,13 @@ func TestCreateOIDCOAuthAccountExistingEmailReturnsChoicePendingSessionState(t *
 	session, err := client.PendingAuthSession.Create().
 		SetSessionToken("existing-email-session-token").
 		SetIntent("login").
-		SetProviderType("oidc").
+		SetProviderType("linuxdo").
 		SetProviderKey("https://issuer.example").
-		SetProviderSubject("oidc-existing-123").
+		SetProviderSubject("linuxdo-existing-123").
 		SetBrowserSessionKey("existing-email-browser-session-key").
 		SetUpstreamIdentityClaims(map[string]any{
-			"username":               "oidc_user",
-			"suggested_display_name": "Existing OIDC User",
+			"username":               "linuxdo_user",
+			"suggested_display_name": "Existing LinuxDo User",
 			"suggested_avatar_url":   "https://cdn.example/existing.png",
 		}).
 		SetRedirectTo("/dashboard").
@@ -1364,13 +1408,13 @@ func TestCreateOIDCOAuthAccountExistingEmailReturnsChoicePendingSessionState(t *
 	body := bytes.NewBufferString(`{"email":"owner@example.com","verify_code":"135790","password":"secret-123"}`)
 	recorder := httptest.NewRecorder()
 	ginCtx, _ := gin.CreateTestContext(recorder)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/oauth/oidc/create-account", body)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/oauth/linuxdo/create-account", body)
 	req.Header.Set("Content-Type", "application/json")
 	req.AddCookie(&http.Cookie{Name: oauthPendingSessionCookieName, Value: encodeCookieValue(session.SessionToken)})
 	req.AddCookie(&http.Cookie{Name: oauthPendingBrowserCookieName, Value: encodeCookieValue("existing-email-browser-session-key")})
 	ginCtx.Request = req
 
-	handler.CreateOIDCOAuthAccount(ginCtx)
+	handler.CreateLinuxDoOAuthAccount(ginCtx)
 
 	require.Equal(t, http.StatusOK, recorder.Code)
 
@@ -1378,12 +1422,12 @@ func TestCreateOIDCOAuthAccountExistingEmailReturnsChoicePendingSessionState(t *
 	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &payload))
 	require.Equal(t, "pending_session", payload["auth_result"])
 	require.Equal(t, oauthIntentLogin, payload["intent"])
-	require.Equal(t, "oidc", payload["provider"])
+	require.Equal(t, "linuxdo", payload["provider"])
 	require.Equal(t, "/dashboard", payload["redirect"])
 	require.Equal(t, true, payload["adoption_required"])
 	require.Equal(t, oauthPendingChoiceStep, payload["step"])
 	require.Equal(t, "owner@example.com", payload["email"])
-	require.Equal(t, "Existing OIDC User", payload["suggested_display_name"])
+	require.Equal(t, "Existing LinuxDo User", payload["suggested_display_name"])
 	require.Equal(t, "https://cdn.example/existing.png", payload["suggested_avatar_url"])
 
 	storedSession, err := client.PendingAuthSession.Get(ctx, session.ID)
@@ -1396,16 +1440,16 @@ func TestCreateOIDCOAuthAccountExistingEmailReturnsChoicePendingSessionState(t *
 
 	identityCount, err := client.AuthIdentity.Query().
 		Where(
-			authidentity.ProviderTypeEQ("oidc"),
+			authidentity.ProviderTypeEQ("linuxdo"),
 			authidentity.ProviderKeyEQ("https://issuer.example"),
-			authidentity.ProviderSubjectEQ("oidc-existing-123"),
+			authidentity.ProviderSubjectEQ("linuxdo-existing-123"),
 		).
 		Count(ctx)
 	require.NoError(t, err)
 	require.Zero(t, identityCount)
 }
 
-func TestCreateOIDCOAuthAccountExistingEmailNormalizesLegacySpacingAndCase(t *testing.T) {
+func TestCreateLinuxDoOAuthAccountExistingEmailNormalizesLegacySpacingAndCase(t *testing.T) {
 	handler, client := newOAuthPendingFlowTestHandlerWithEmailVerification(t, false, "owner@example.com", "135790")
 	ctx := context.Background()
 
@@ -1421,13 +1465,13 @@ func TestCreateOIDCOAuthAccountExistingEmailNormalizesLegacySpacingAndCase(t *te
 	session, err := client.PendingAuthSession.Create().
 		SetSessionToken("existing-email-normalized-session-token").
 		SetIntent("login").
-		SetProviderType("oidc").
+		SetProviderType("linuxdo").
 		SetProviderKey("https://issuer.example").
-		SetProviderSubject("oidc-existing-normalized-123").
+		SetProviderSubject("linuxdo-existing-normalized-123").
 		SetBrowserSessionKey("existing-email-normalized-browser-session-key").
 		SetUpstreamIdentityClaims(map[string]any{
-			"username":               "oidc_user",
-			"suggested_display_name": "Existing OIDC User",
+			"username":               "linuxdo_user",
+			"suggested_display_name": "Existing LinuxDo User",
 			"suggested_avatar_url":   "https://cdn.example/existing.png",
 		}).
 		SetRedirectTo("/dashboard").
@@ -1438,13 +1482,13 @@ func TestCreateOIDCOAuthAccountExistingEmailNormalizesLegacySpacingAndCase(t *te
 	body := bytes.NewBufferString(`{"email":"owner@example.com","verify_code":"135790","password":"secret-123"}`)
 	recorder := httptest.NewRecorder()
 	ginCtx, _ := gin.CreateTestContext(recorder)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/oauth/oidc/create-account", body)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/oauth/linuxdo/create-account", body)
 	req.Header.Set("Content-Type", "application/json")
 	req.AddCookie(&http.Cookie{Name: oauthPendingSessionCookieName, Value: encodeCookieValue(session.SessionToken)})
 	req.AddCookie(&http.Cookie{Name: oauthPendingBrowserCookieName, Value: encodeCookieValue("existing-email-normalized-browser-session-key")})
 	ginCtx.Request = req
 
-	handler.CreateOIDCOAuthAccount(ginCtx)
+	handler.CreateLinuxDoOAuthAccount(ginCtx)
 
 	require.Equal(t, http.StatusOK, recorder.Code)
 
@@ -1460,7 +1504,7 @@ func TestCreateOIDCOAuthAccountExistingEmailNormalizesLegacySpacingAndCase(t *te
 	require.Equal(t, "owner@example.com", storedSession.ResolvedEmail)
 }
 
-func TestCreateOIDCOAuthAccountRejectsSecondEmailOutsideRegistrationSuffixWhitelist(t *testing.T) {
+func TestCreateLinuxDoOAuthAccountRejectsSecondEmailOutsideRegistrationSuffixWhitelist(t *testing.T) {
 	handler, client := newOAuthPendingFlowTestHandlerWithDependencies(t, oauthPendingFlowTestHandlerOptions{
 		emailVerifyEnabled: true,
 		emailCache: &oauthPendingFlowEmailCacheStub{
@@ -1490,12 +1534,12 @@ func TestCreateOIDCOAuthAccountRejectsSecondEmailOutsideRegistrationSuffixWhitel
 	session, err := client.PendingAuthSession.Create().
 		SetSessionToken("suffix-whitelist-session-token").
 		SetIntent("login").
-		SetProviderType("oidc").
+		SetProviderType("linuxdo").
 		SetProviderKey("https://issuer.example").
-		SetProviderSubject("oidc-suffix-whitelist-123").
+		SetProviderSubject("linuxdo-suffix-whitelist-123").
 		SetBrowserSessionKey("suffix-whitelist-browser-session-key").
 		SetUpstreamIdentityClaims(map[string]any{
-			"username": "oidc_user",
+			"username": "linuxdo_user",
 		}).
 		SetExpiresAt(time.Now().UTC().Add(10 * time.Minute)).
 		Save(ctx)
@@ -1504,13 +1548,13 @@ func TestCreateOIDCOAuthAccountRejectsSecondEmailOutsideRegistrationSuffixWhitel
 	body := bytes.NewBufferString(`{"email":"foo@gmail.com","verify_code":"135790","password":"secret-123"}`)
 	recorder := httptest.NewRecorder()
 	ginCtx, _ := gin.CreateTestContext(recorder)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/oauth/oidc/create-account", body)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/oauth/linuxdo/create-account", body)
 	req.Header.Set("Content-Type", "application/json")
 	req.AddCookie(&http.Cookie{Name: oauthPendingSessionCookieName, Value: encodeCookieValue(session.SessionToken)})
 	req.AddCookie(&http.Cookie{Name: oauthPendingBrowserCookieName, Value: encodeCookieValue("suffix-whitelist-browser-session-key")})
 	ginCtx.Request = req
 
-	handler.CreateOIDCOAuthAccount(ginCtx)
+	handler.CreateLinuxDoOAuthAccount(ginCtx)
 
 	require.Equal(t, http.StatusBadRequest, recorder.Code)
 	payload := decodeJSONBody(t, recorder)
@@ -1523,7 +1567,7 @@ func TestCreateOIDCOAuthAccountRejectsSecondEmailOutsideRegistrationSuffixWhitel
 
 // 域名限量注册开关默认关闭：白名单外域名保持 PR5423 之前的严格拒绝语义，
 // 即使该域名下还没有任何账户也不放行。
-func TestCreateOIDCOAuthAccountRejectsEmailOutsideWhitelistWhenQuotaDisabled(t *testing.T) {
+func TestCreateLinuxDoOAuthAccountRejectsEmailOutsideWhitelistWhenQuotaDisabled(t *testing.T) {
 	handler, client := newOAuthPendingFlowTestHandlerWithDependencies(t, oauthPendingFlowTestHandlerOptions{
 		emailVerifyEnabled: true,
 		emailCache: &oauthPendingFlowEmailCacheStub{
@@ -1544,12 +1588,12 @@ func TestCreateOIDCOAuthAccountRejectsEmailOutsideWhitelistWhenQuotaDisabled(t *
 	session, err := client.PendingAuthSession.Create().
 		SetSessionToken("suffix-strict-session-token").
 		SetIntent("login").
-		SetProviderType("oidc").
+		SetProviderType("linuxdo").
 		SetProviderKey("https://issuer.example").
-		SetProviderSubject("oidc-suffix-strict-123").
+		SetProviderSubject("linuxdo-suffix-strict-123").
 		SetBrowserSessionKey("suffix-strict-browser-session-key").
 		SetUpstreamIdentityClaims(map[string]any{
-			"username": "oidc_user",
+			"username": "linuxdo_user",
 		}).
 		SetExpiresAt(time.Now().UTC().Add(10 * time.Minute)).
 		Save(ctx)
@@ -1558,13 +1602,13 @@ func TestCreateOIDCOAuthAccountRejectsEmailOutsideWhitelistWhenQuotaDisabled(t *
 	body := bytes.NewBufferString(`{"email":"foo@gmail.com","verify_code":"135790","password":"secret-123"}`)
 	recorder := httptest.NewRecorder()
 	ginCtx, _ := gin.CreateTestContext(recorder)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/oauth/oidc/create-account", body)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/oauth/linuxdo/create-account", body)
 	req.Header.Set("Content-Type", "application/json")
 	req.AddCookie(&http.Cookie{Name: oauthPendingSessionCookieName, Value: encodeCookieValue(session.SessionToken)})
 	req.AddCookie(&http.Cookie{Name: oauthPendingBrowserCookieName, Value: encodeCookieValue("suffix-strict-browser-session-key")})
 	ginCtx.Request = req
 
-	handler.CreateOIDCOAuthAccount(ginCtx)
+	handler.CreateLinuxDoOAuthAccount(ginCtx)
 
 	require.Equal(t, http.StatusBadRequest, recorder.Code)
 	payload := decodeJSONBody(t, recorder)
@@ -1591,9 +1635,9 @@ func TestSendPendingOAuthVerifyCodeExistingEmailReturnsBindLoginState(t *testing
 	session, err := client.PendingAuthSession.Create().
 		SetSessionToken("existing-email-send-code-session-token").
 		SetIntent("login").
-		SetProviderType("oidc").
+		SetProviderType("linuxdo").
 		SetProviderKey("https://issuer.example").
-		SetProviderSubject("oidc-existing-send-code-123").
+		SetProviderSubject("linuxdo-existing-send-code-123").
 		SetBrowserSessionKey("existing-email-send-code-browser-session-key").
 		SetLocalFlowState(map[string]any{
 			oauthCompletionResponseKey: map[string]any{
@@ -1632,7 +1676,7 @@ func TestSendPendingOAuthVerifyCodeExistingEmailReturnsBindLoginState(t *testing
 	require.Equal(t, "owner@example.com", storedSession.ResolvedEmail)
 }
 
-func TestCreateOIDCOAuthAccountBlocksBackendModeBeforeCreatingUser(t *testing.T) {
+func TestCreateLinuxDoOAuthAccountBlocksBackendModeBeforeCreatingUser(t *testing.T) {
 	handler, client := newOAuthPendingFlowTestHandlerWithDependencies(t, oauthPendingFlowTestHandlerOptions{
 		emailVerifyEnabled: true,
 		emailCache: &oauthPendingFlowEmailCacheStub{
@@ -1653,12 +1697,12 @@ func TestCreateOIDCOAuthAccountBlocksBackendModeBeforeCreatingUser(t *testing.T)
 	session, err := client.PendingAuthSession.Create().
 		SetSessionToken("create-account-backend-mode-session-token").
 		SetIntent("login").
-		SetProviderType("oidc").
+		SetProviderType("linuxdo").
 		SetProviderKey("https://issuer.example").
-		SetProviderSubject("oidc-create-backend-mode-123").
+		SetProviderSubject("linuxdo-create-backend-mode-123").
 		SetBrowserSessionKey("create-account-backend-mode-browser-session-key").
 		SetUpstreamIdentityClaims(map[string]any{
-			"username": "oidc_user",
+			"username": "linuxdo_user",
 		}).
 		SetExpiresAt(time.Now().UTC().Add(10 * time.Minute)).
 		Save(ctx)
@@ -1667,13 +1711,13 @@ func TestCreateOIDCOAuthAccountBlocksBackendModeBeforeCreatingUser(t *testing.T)
 	body := bytes.NewBufferString(`{"email":"fresh@example.com","verify_code":"246810","password":"secret-123"}`)
 	recorder := httptest.NewRecorder()
 	ginCtx, _ := gin.CreateTestContext(recorder)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/oauth/oidc/create-account", body)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/oauth/linuxdo/create-account", body)
 	req.Header.Set("Content-Type", "application/json")
 	req.AddCookie(&http.Cookie{Name: oauthPendingSessionCookieName, Value: encodeCookieValue(session.SessionToken)})
 	req.AddCookie(&http.Cookie{Name: oauthPendingBrowserCookieName, Value: encodeCookieValue("create-account-backend-mode-browser-session-key")})
 	ginCtx.Request = req
 
-	handler.CreateOIDCOAuthAccount(ginCtx)
+	handler.CreateLinuxDoOAuthAccount(ginCtx)
 
 	require.Equal(t, http.StatusForbidden, recorder.Code)
 
@@ -1706,7 +1750,7 @@ func TestLogoutClearsPendingOAuthAndBindCookies(t *testing.T) {
 	require.Equal(t, -1, findCookie(recorder.Result().Cookies(), oauthBindAccessTokenCookieName).MaxAge)
 }
 
-func TestCreateOIDCOAuthAccountRollsBackCreatedUserWhenBindingFails(t *testing.T) {
+func TestCreateLinuxDoOAuthAccountRollsBackCreatedUserWhenBindingFails(t *testing.T) {
 	handler, client := newOAuthPendingFlowTestHandlerWithEmailVerification(t, true, "fresh@example.com", "246810")
 	ctx := context.Background()
 
@@ -1721,9 +1765,9 @@ func TestCreateOIDCOAuthAccountRollsBackCreatedUserWhenBindingFails(t *testing.T
 
 	_, err = client.AuthIdentity.Create().
 		SetUserID(conflictOwner.ID).
-		SetProviderType("oidc").
+		SetProviderType("linuxdo").
 		SetProviderKey("https://issuer.example").
-		SetProviderSubject("oidc-conflict-123").
+		SetProviderSubject("linuxdo-conflict-123").
 		SetMetadata(map[string]any{
 			"username": "owner-user",
 		}).
@@ -1741,12 +1785,12 @@ func TestCreateOIDCOAuthAccountRollsBackCreatedUserWhenBindingFails(t *testing.T
 	session, err := client.PendingAuthSession.Create().
 		SetSessionToken("create-account-conflict-session-token").
 		SetIntent("login").
-		SetProviderType("oidc").
+		SetProviderType("linuxdo").
 		SetProviderKey("https://issuer.example").
-		SetProviderSubject("oidc-conflict-123").
+		SetProviderSubject("linuxdo-conflict-123").
 		SetBrowserSessionKey("create-account-conflict-browser-session-key").
 		SetUpstreamIdentityClaims(map[string]any{
-			"username": "oidc_user",
+			"username": "linuxdo_user",
 		}).
 		SetRedirectTo("/profile").
 		SetExpiresAt(time.Now().UTC().Add(10 * time.Minute)).
@@ -1756,13 +1800,13 @@ func TestCreateOIDCOAuthAccountRollsBackCreatedUserWhenBindingFails(t *testing.T
 	body := bytes.NewBufferString(`{"email":"fresh@example.com","verify_code":"246810","password":"secret-123","invitation_code":"INVITE123"}`)
 	recorder := httptest.NewRecorder()
 	ginCtx, _ := gin.CreateTestContext(recorder)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/oauth/oidc/create-account", body)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/oauth/linuxdo/create-account", body)
 	req.Header.Set("Content-Type", "application/json")
 	req.AddCookie(&http.Cookie{Name: oauthPendingSessionCookieName, Value: encodeCookieValue(session.SessionToken)})
 	req.AddCookie(&http.Cookie{Name: oauthPendingBrowserCookieName, Value: encodeCookieValue("create-account-conflict-browser-session-key")})
 	ginCtx.Request = req
 
-	handler.CreateOIDCOAuthAccount(ginCtx)
+	handler.CreateLinuxDoOAuthAccount(ginCtx)
 
 	require.Equal(t, http.StatusConflict, recorder.Code)
 
@@ -1781,7 +1825,7 @@ func TestCreateOIDCOAuthAccountRollsBackCreatedUserWhenBindingFails(t *testing.T
 	require.Nil(t, storedSession.ConsumedAt)
 }
 
-func TestCreateOIDCOAuthAccountRollsBackPostBindFailureBeforeIdentityCanCommit(t *testing.T) {
+func TestCreateLinuxDoOAuthAccountRollsBackPostBindFailureBeforeIdentityCanCommit(t *testing.T) {
 	handler, client := newOAuthPendingFlowTestHandlerWithDependencies(t, oauthPendingFlowTestHandlerOptions{
 		emailVerifyEnabled: true,
 		emailCache: &oauthPendingFlowEmailCacheStub{
@@ -1802,12 +1846,12 @@ func TestCreateOIDCOAuthAccountRollsBackPostBindFailureBeforeIdentityCanCommit(t
 	session, err := client.PendingAuthSession.Create().
 		SetSessionToken("create-account-finalize-failure-session-token").
 		SetIntent("login").
-		SetProviderType("oidc").
+		SetProviderType("linuxdo").
 		SetProviderKey("https://issuer.example").
-		SetProviderSubject("oidc-finalize-failure-123").
+		SetProviderSubject("linuxdo-finalize-failure-123").
 		SetBrowserSessionKey("create-account-finalize-failure-browser-session-key").
 		SetUpstreamIdentityClaims(map[string]any{
-			"username": "oidc_user",
+			"username": "linuxdo_user",
 		}).
 		SetRedirectTo("/profile").
 		SetExpiresAt(time.Now().UTC().Add(10 * time.Minute)).
@@ -1824,13 +1868,13 @@ func TestCreateOIDCOAuthAccountRollsBackPostBindFailureBeforeIdentityCanCommit(t
 	body := bytes.NewBufferString(`{"email":"fresh@example.com","verify_code":"246810","password":"secret-123"}`)
 	recorder := httptest.NewRecorder()
 	ginCtx, _ := gin.CreateTestContext(recorder)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/oauth/oidc/create-account", body)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/oauth/linuxdo/create-account", body)
 	req.Header.Set("Content-Type", "application/json")
 	req.AddCookie(&http.Cookie{Name: oauthPendingSessionCookieName, Value: encodeCookieValue(session.SessionToken)})
 	req.AddCookie(&http.Cookie{Name: oauthPendingBrowserCookieName, Value: encodeCookieValue("create-account-finalize-failure-browser-session-key")})
 	ginCtx.Request = req
 
-	handler.CreateOIDCOAuthAccount(ginCtx)
+	handler.CreateLinuxDoOAuthAccount(ginCtx)
 
 	require.Equal(t, http.StatusInternalServerError, recorder.Code)
 
@@ -1840,9 +1884,9 @@ func TestCreateOIDCOAuthAccountRollsBackPostBindFailureBeforeIdentityCanCommit(t
 
 	identityCount, err := client.AuthIdentity.Query().
 		Where(
-			authidentity.ProviderTypeEQ("oidc"),
+			authidentity.ProviderTypeEQ("linuxdo"),
 			authidentity.ProviderKeyEQ("https://issuer.example"),
-			authidentity.ProviderSubjectEQ("oidc-finalize-failure-123"),
+			authidentity.ProviderSubjectEQ("linuxdo-finalize-failure-123"),
 		).
 		Count(ctx)
 	require.NoError(t, err)
@@ -1853,7 +1897,7 @@ func TestCreateOIDCOAuthAccountRollsBackPostBindFailureBeforeIdentityCanCommit(t
 	require.Nil(t, storedSession.ConsumedAt)
 }
 
-func TestBindOIDCOAuthLoginBindsExistingUserAndConsumesSession(t *testing.T) {
+func TestBindLinuxDoOAuthLoginBindsExistingUserAndConsumesSession(t *testing.T) {
 	handler, client := newOAuthPendingFlowTestHandler(t, false)
 	ctx := context.Background()
 
@@ -1872,15 +1916,15 @@ func TestBindOIDCOAuthLoginBindsExistingUserAndConsumesSession(t *testing.T) {
 	session, err := client.PendingAuthSession.Create().
 		SetSessionToken("bind-login-session-token").
 		SetIntent("adopt_existing_user_by_email").
-		SetProviderType("oidc").
+		SetProviderType("linuxdo").
 		SetProviderKey("https://issuer.example").
-		SetProviderSubject("oidc-bind-123").
+		SetProviderSubject("linuxdo-bind-123").
 		SetTargetUserID(existingUser.ID).
 		SetResolvedEmail(existingUser.Email).
 		SetBrowserSessionKey("bind-login-browser-session-key").
 		SetUpstreamIdentityClaims(map[string]any{
-			"username":               "oidc_user",
-			"suggested_display_name": "Bound OIDC User",
+			"username":               "linuxdo_user",
+			"suggested_display_name": "Bound LinuxDo User",
 			"suggested_avatar_url":   "https://cdn.example/bound.png",
 		}).
 		SetRedirectTo("/profile").
@@ -1891,13 +1935,13 @@ func TestBindOIDCOAuthLoginBindsExistingUserAndConsumesSession(t *testing.T) {
 	body := bytes.NewBufferString(`{"email":"owner@example.com","password":"secret-123","adopt_display_name":false,"adopt_avatar":false}`)
 	recorder := httptest.NewRecorder()
 	ginCtx, _ := gin.CreateTestContext(recorder)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/oauth/oidc/bind-login", body)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/oauth/linuxdo/bind-login", body)
 	req.Header.Set("Content-Type", "application/json")
 	req.AddCookie(&http.Cookie{Name: oauthPendingSessionCookieName, Value: encodeCookieValue(session.SessionToken)})
 	req.AddCookie(&http.Cookie{Name: oauthPendingBrowserCookieName, Value: encodeCookieValue("bind-login-browser-session-key")})
 	ginCtx.Request = req
 
-	handler.BindOIDCOAuthLogin(ginCtx)
+	handler.BindLinuxDoOAuthLogin(ginCtx)
 
 	require.Equal(t, http.StatusOK, recorder.Code)
 
@@ -1909,9 +1953,9 @@ func TestBindOIDCOAuthLoginBindsExistingUserAndConsumesSession(t *testing.T) {
 
 	identity, err := client.AuthIdentity.Query().
 		Where(
-			authidentity.ProviderTypeEQ("oidc"),
+			authidentity.ProviderTypeEQ("linuxdo"),
 			authidentity.ProviderKeyEQ("https://issuer.example"),
-			authidentity.ProviderSubjectEQ("oidc-bind-123"),
+			authidentity.ProviderSubjectEQ("linuxdo-bind-123"),
 		).
 		Only(ctx)
 	require.NoError(t, err)
@@ -1922,7 +1966,7 @@ func TestBindOIDCOAuthLoginBindsExistingUserAndConsumesSession(t *testing.T) {
 	require.NotNil(t, storedSession.ConsumedAt)
 }
 
-func TestBindOIDCOAuthLoginBlocksBackendModeBeforeTokenIssue(t *testing.T) {
+func TestBindLinuxDoOAuthLoginBlocksBackendModeBeforeTokenIssue(t *testing.T) {
 	handler, client := newOAuthPendingFlowTestHandlerWithDependencies(t, oauthPendingFlowTestHandlerOptions{
 		settingValues: map[string]string{
 			service.SettingKeyBackendModeEnabled: "true",
@@ -1945,14 +1989,14 @@ func TestBindOIDCOAuthLoginBlocksBackendModeBeforeTokenIssue(t *testing.T) {
 	session, err := client.PendingAuthSession.Create().
 		SetSessionToken("bind-login-backend-mode-session-token").
 		SetIntent("adopt_existing_user_by_email").
-		SetProviderType("oidc").
+		SetProviderType("linuxdo").
 		SetProviderKey("https://issuer.example").
-		SetProviderSubject("oidc-bind-backend-mode-123").
+		SetProviderSubject("linuxdo-bind-backend-mode-123").
 		SetTargetUserID(existingUser.ID).
 		SetResolvedEmail(existingUser.Email).
 		SetBrowserSessionKey("bind-login-backend-mode-browser-session-key").
 		SetUpstreamIdentityClaims(map[string]any{
-			"username": "oidc_user",
+			"username": "linuxdo_user",
 		}).
 		SetExpiresAt(time.Now().UTC().Add(10 * time.Minute)).
 		Save(ctx)
@@ -1961,21 +2005,21 @@ func TestBindOIDCOAuthLoginBlocksBackendModeBeforeTokenIssue(t *testing.T) {
 	body := bytes.NewBufferString(`{"email":"owner@example.com","password":"secret-123"}`)
 	recorder := httptest.NewRecorder()
 	ginCtx, _ := gin.CreateTestContext(recorder)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/oauth/oidc/bind-login", body)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/oauth/linuxdo/bind-login", body)
 	req.Header.Set("Content-Type", "application/json")
 	req.AddCookie(&http.Cookie{Name: oauthPendingSessionCookieName, Value: encodeCookieValue(session.SessionToken)})
 	req.AddCookie(&http.Cookie{Name: oauthPendingBrowserCookieName, Value: encodeCookieValue("bind-login-backend-mode-browser-session-key")})
 	ginCtx.Request = req
 
-	handler.BindOIDCOAuthLogin(ginCtx)
+	handler.BindLinuxDoOAuthLogin(ginCtx)
 
 	require.Equal(t, http.StatusForbidden, recorder.Code)
 
 	identityCount, err := client.AuthIdentity.Query().
 		Where(
-			authidentity.ProviderTypeEQ("oidc"),
+			authidentity.ProviderTypeEQ("linuxdo"),
 			authidentity.ProviderKeyEQ("https://issuer.example"),
-			authidentity.ProviderSubjectEQ("oidc-bind-backend-mode-123"),
+			authidentity.ProviderSubjectEQ("linuxdo-bind-backend-mode-123"),
 		).
 		Count(ctx)
 	require.NoError(t, err)
@@ -1986,7 +2030,7 @@ func TestBindOIDCOAuthLoginBlocksBackendModeBeforeTokenIssue(t *testing.T) {
 	require.Nil(t, storedSession.ConsumedAt)
 }
 
-func TestBindOIDCOAuthLoginRejectsInvalidPasswordWithoutConsumingSession(t *testing.T) {
+func TestBindLinuxDoOAuthLoginRejectsInvalidPasswordWithoutConsumingSession(t *testing.T) {
 	handler, client := newOAuthPendingFlowTestHandler(t, false)
 	ctx := context.Background()
 
@@ -2005,15 +2049,15 @@ func TestBindOIDCOAuthLoginRejectsInvalidPasswordWithoutConsumingSession(t *test
 	session, err := client.PendingAuthSession.Create().
 		SetSessionToken("bind-login-invalid-password-session-token").
 		SetIntent("adopt_existing_user_by_email").
-		SetProviderType("oidc").
+		SetProviderType("linuxdo").
 		SetProviderKey("https://issuer.example").
-		SetProviderSubject("oidc-bind-invalid-123").
+		SetProviderSubject("linuxdo-bind-invalid-123").
 		SetTargetUserID(existingUser.ID).
 		SetResolvedEmail(existingUser.Email).
 		SetBrowserSessionKey("bind-login-invalid-password-browser-session-key").
 		SetUpstreamIdentityClaims(map[string]any{
-			"username":               "oidc_user",
-			"suggested_display_name": "Bound OIDC User",
+			"username":               "linuxdo_user",
+			"suggested_display_name": "Bound LinuxDo User",
 			"suggested_avatar_url":   "https://cdn.example/bound.png",
 		}).
 		SetExpiresAt(time.Now().UTC().Add(10 * time.Minute)).
@@ -2023,13 +2067,13 @@ func TestBindOIDCOAuthLoginRejectsInvalidPasswordWithoutConsumingSession(t *test
 	body := bytes.NewBufferString(`{"email":"owner@example.com","password":"wrong-password"}`)
 	recorder := httptest.NewRecorder()
 	ginCtx, _ := gin.CreateTestContext(recorder)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/oauth/oidc/bind-login", body)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/oauth/linuxdo/bind-login", body)
 	req.Header.Set("Content-Type", "application/json")
 	req.AddCookie(&http.Cookie{Name: oauthPendingSessionCookieName, Value: encodeCookieValue(session.SessionToken)})
 	req.AddCookie(&http.Cookie{Name: oauthPendingBrowserCookieName, Value: encodeCookieValue("bind-login-invalid-password-browser-session-key")})
 	ginCtx.Request = req
 
-	handler.BindOIDCOAuthLogin(ginCtx)
+	handler.BindLinuxDoOAuthLogin(ginCtx)
 
 	require.Equal(t, http.StatusUnauthorized, recorder.Code)
 	payload := decodeJSONBody(t, recorder)
@@ -2037,9 +2081,9 @@ func TestBindOIDCOAuthLoginRejectsInvalidPasswordWithoutConsumingSession(t *test
 
 	identityCount, err := client.AuthIdentity.Query().
 		Where(
-			authidentity.ProviderTypeEQ("oidc"),
+			authidentity.ProviderTypeEQ("linuxdo"),
 			authidentity.ProviderKeyEQ("https://issuer.example"),
-			authidentity.ProviderSubjectEQ("oidc-bind-invalid-123"),
+			authidentity.ProviderSubjectEQ("linuxdo-bind-invalid-123"),
 		).
 		Count(ctx)
 	require.NoError(t, err)
@@ -2050,7 +2094,7 @@ func TestBindOIDCOAuthLoginRejectsInvalidPasswordWithoutConsumingSession(t *test
 	require.Nil(t, storedSession.ConsumedAt)
 }
 
-func TestBindOIDCOAuthLoginReclaimsIdentityOwnedBySoftDeletedUser(t *testing.T) {
+func TestBindLinuxDoOAuthLoginReclaimsIdentityOwnedBySoftDeletedUser(t *testing.T) {
 	handler, client := newOAuthPendingFlowTestHandler(t, false)
 	ctx := context.Background()
 
@@ -2067,9 +2111,9 @@ func TestBindOIDCOAuthLoginReclaimsIdentityOwnedBySoftDeletedUser(t *testing.T) 
 
 	identity, err := client.AuthIdentity.Create().
 		SetUserID(oldOwner.ID).
-		SetProviderType("oidc").
+		SetProviderType("linuxdo").
 		SetProviderKey("https://issuer.example").
-		SetProviderSubject("oidc-bind-soft-deleted-123").
+		SetProviderSubject("linuxdo-bind-soft-deleted-123").
 		SetMetadata(map[string]any{"username": "old-owner"}).
 		Save(ctx)
 	require.NoError(t, err)
@@ -2091,15 +2135,15 @@ func TestBindOIDCOAuthLoginReclaimsIdentityOwnedBySoftDeletedUser(t *testing.T) 
 	session, err := client.PendingAuthSession.Create().
 		SetSessionToken("bind-login-soft-deleted-owner-session-token").
 		SetIntent("adopt_existing_user_by_email").
-		SetProviderType("oidc").
+		SetProviderType("linuxdo").
 		SetProviderKey("https://issuer.example").
-		SetProviderSubject("oidc-bind-soft-deleted-123").
+		SetProviderSubject("linuxdo-bind-soft-deleted-123").
 		SetTargetUserID(newOwner.ID).
 		SetResolvedEmail(newOwner.Email).
 		SetBrowserSessionKey("bind-login-soft-deleted-owner-browser-session-key").
 		SetUpstreamIdentityClaims(map[string]any{
-			"username":               "oidc_user",
-			"suggested_display_name": "Recovered OIDC User",
+			"username":               "linuxdo_user",
+			"suggested_display_name": "Recovered LinuxDo User",
 		}).
 		SetRedirectTo("/profile").
 		SetExpiresAt(time.Now().UTC().Add(10 * time.Minute)).
@@ -2109,13 +2153,13 @@ func TestBindOIDCOAuthLoginReclaimsIdentityOwnedBySoftDeletedUser(t *testing.T) 
 	body := bytes.NewBufferString(`{"email":"owner@example.com","password":"secret-123","adopt_display_name":false,"adopt_avatar":false}`)
 	recorder := httptest.NewRecorder()
 	ginCtx, _ := gin.CreateTestContext(recorder)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/oauth/oidc/bind-login", body)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/oauth/linuxdo/bind-login", body)
 	req.Header.Set("Content-Type", "application/json")
 	req.AddCookie(&http.Cookie{Name: oauthPendingSessionCookieName, Value: encodeCookieValue(session.SessionToken)})
 	req.AddCookie(&http.Cookie{Name: oauthPendingBrowserCookieName, Value: encodeCookieValue("bind-login-soft-deleted-owner-browser-session-key")})
 	ginCtx.Request = req
 
-	handler.BindOIDCOAuthLogin(ginCtx)
+	handler.BindLinuxDoOAuthLogin(ginCtx)
 
 	require.Equal(t, http.StatusOK, recorder.Code)
 
@@ -2124,14 +2168,14 @@ func TestBindOIDCOAuthLoginReclaimsIdentityOwnedBySoftDeletedUser(t *testing.T) 
 	require.Equal(t, newOwner.ID, identity.UserID)
 }
 
-func TestBindOIDCOAuthLoginAppliesFirstBindGrantOnce(t *testing.T) {
+func TestBindLinuxDoOAuthLoginAppliesFirstBindGrantOnce(t *testing.T) {
 	defaultSubAssigner := &oauthPendingFlowDefaultSubAssignerStub{}
 	handler, client := newOAuthPendingFlowTestHandlerWithDependencies(t, oauthPendingFlowTestHandlerOptions{
 		settingValues: map[string]string{
-			service.SettingKeyAuthSourceDefaultOIDCBalance:          "12.5",
-			service.SettingKeyAuthSourceDefaultOIDCConcurrency:      "3",
-			service.SettingKeyAuthSourceDefaultOIDCSubscriptions:    `[{"group_id":101,"validity_days":30}]`,
-			service.SettingKeyAuthSourceDefaultOIDCGrantOnFirstBind: "true",
+			service.SettingKeyAuthSourceDefaultLinuxDoBalance:          "12.5",
+			service.SettingKeyAuthSourceDefaultLinuxDoConcurrency:      "3",
+			service.SettingKeyAuthSourceDefaultLinuxDoSubscriptions:    `[{"group_id":101,"validity_days":30}]`,
+			service.SettingKeyAuthSourceDefaultLinuxDoGrantOnFirstBind: "true",
 		},
 		defaultSubAssigner: defaultSubAssigner,
 	})
@@ -2154,14 +2198,14 @@ func TestBindOIDCOAuthLoginAppliesFirstBindGrantOnce(t *testing.T) {
 	firstSession, err := client.PendingAuthSession.Create().
 		SetSessionToken("first-bind-session-token").
 		SetIntent("adopt_existing_user_by_email").
-		SetProviderType("oidc").
+		SetProviderType("linuxdo").
 		SetProviderKey("https://issuer.example").
-		SetProviderSubject("oidc-bind-first-123").
+		SetProviderSubject("linuxdo-bind-first-123").
 		SetTargetUserID(existingUser.ID).
 		SetResolvedEmail(existingUser.Email).
 		SetBrowserSessionKey("first-bind-browser-session-key").
 		SetUpstreamIdentityClaims(map[string]any{
-			"suggested_display_name": "Bound OIDC User",
+			"suggested_display_name": "Bound LinuxDo User",
 			"suggested_avatar_url":   "https://cdn.example/bound.png",
 		}).
 		SetRedirectTo("/profile").
@@ -2172,13 +2216,13 @@ func TestBindOIDCOAuthLoginAppliesFirstBindGrantOnce(t *testing.T) {
 	firstBody := bytes.NewBufferString(`{"email":"owner@example.com","password":"secret-123","adopt_display_name":false,"adopt_avatar":false}`)
 	firstRecorder := httptest.NewRecorder()
 	firstGinCtx, _ := gin.CreateTestContext(firstRecorder)
-	firstReq := httptest.NewRequest(http.MethodPost, "/api/v1/auth/oauth/oidc/bind-login", firstBody)
+	firstReq := httptest.NewRequest(http.MethodPost, "/api/v1/auth/oauth/linuxdo/bind-login", firstBody)
 	firstReq.Header.Set("Content-Type", "application/json")
 	firstReq.AddCookie(&http.Cookie{Name: oauthPendingSessionCookieName, Value: encodeCookieValue(firstSession.SessionToken)})
 	firstReq.AddCookie(&http.Cookie{Name: oauthPendingBrowserCookieName, Value: encodeCookieValue("first-bind-browser-session-key")})
 	firstGinCtx.Request = firstReq
 
-	handler.BindOIDCOAuthLogin(firstGinCtx)
+	handler.BindLinuxDoOAuthLogin(firstGinCtx)
 
 	require.Equal(t, http.StatusOK, firstRecorder.Code)
 
@@ -2191,19 +2235,19 @@ func TestBindOIDCOAuthLoginAppliesFirstBindGrantOnce(t *testing.T) {
 	require.Equal(t, int64(existingUser.ID), defaultSubAssigner.calls[0].UserID)
 	require.Equal(t, int64(101), defaultSubAssigner.calls[0].GroupID)
 	require.Equal(t, 30, defaultSubAssigner.calls[0].ValidityDays)
-	require.Equal(t, 1, countProviderGrantRecords(t, client, existingUser.ID, "oidc", "first_bind"))
+	require.Equal(t, 1, countProviderGrantRecords(t, client, existingUser.ID, "linuxdo", "first_bind"))
 
 	secondSession, err := client.PendingAuthSession.Create().
 		SetSessionToken("second-bind-session-token").
 		SetIntent("adopt_existing_user_by_email").
-		SetProviderType("oidc").
+		SetProviderType("linuxdo").
 		SetProviderKey("https://issuer.example").
-		SetProviderSubject("oidc-bind-second-456").
+		SetProviderSubject("linuxdo-bind-second-456").
 		SetTargetUserID(existingUser.ID).
 		SetResolvedEmail(existingUser.Email).
 		SetBrowserSessionKey("second-bind-browser-session-key").
 		SetUpstreamIdentityClaims(map[string]any{
-			"suggested_display_name": "Second OIDC User",
+			"suggested_display_name": "Second LinuxDo User",
 			"suggested_avatar_url":   "https://cdn.example/second.png",
 		}).
 		SetRedirectTo("/profile").
@@ -2214,13 +2258,13 @@ func TestBindOIDCOAuthLoginAppliesFirstBindGrantOnce(t *testing.T) {
 	secondBody := bytes.NewBufferString(`{"email":"owner@example.com","password":"secret-123","adopt_display_name":false,"adopt_avatar":false}`)
 	secondRecorder := httptest.NewRecorder()
 	secondGinCtx, _ := gin.CreateTestContext(secondRecorder)
-	secondReq := httptest.NewRequest(http.MethodPost, "/api/v1/auth/oauth/oidc/bind-login", secondBody)
+	secondReq := httptest.NewRequest(http.MethodPost, "/api/v1/auth/oauth/linuxdo/bind-login", secondBody)
 	secondReq.Header.Set("Content-Type", "application/json")
 	secondReq.AddCookie(&http.Cookie{Name: oauthPendingSessionCookieName, Value: encodeCookieValue(secondSession.SessionToken)})
 	secondReq.AddCookie(&http.Cookie{Name: oauthPendingBrowserCookieName, Value: encodeCookieValue("second-bind-browser-session-key")})
 	secondGinCtx.Request = secondReq
 
-	handler.BindOIDCOAuthLogin(secondGinCtx)
+	handler.BindLinuxDoOAuthLogin(secondGinCtx)
 
 	require.Equal(t, http.StatusOK, secondRecorder.Code)
 
@@ -2230,7 +2274,7 @@ func TestBindOIDCOAuthLoginAppliesFirstBindGrantOnce(t *testing.T) {
 	require.Equal(t, 5, storedUser.Concurrency)
 	require.Zero(t, storedUser.TotalRecharged)
 	require.Len(t, defaultSubAssigner.calls, 1)
-	require.Equal(t, 1, countProviderGrantRecords(t, client, existingUser.ID, "oidc", "first_bind"))
+	require.Equal(t, 1, countProviderGrantRecords(t, client, existingUser.ID, "linuxdo", "first_bind"))
 }
 
 func TestResolvePendingOAuthTargetUserIDNormalizesLegacySpacingAndCase(t *testing.T) {
@@ -2250,9 +2294,9 @@ func TestResolvePendingOAuthTargetUserIDNormalizesLegacySpacingAndCase(t *testin
 	session, err := client.PendingAuthSession.Create().
 		SetSessionToken("resolve-target-session-token").
 		SetIntent("login").
-		SetProviderType("oidc").
+		SetProviderType("linuxdo").
 		SetProviderKey("https://issuer.example").
-		SetProviderSubject("oidc-target-123").
+		SetProviderSubject("linuxdo-target-123").
 		SetResolvedEmail("owner@example.com").
 		SetBrowserSessionKey("resolve-target-browser-session-key").
 		SetExpiresAt(time.Now().UTC().Add(10 * time.Minute)).
@@ -2264,7 +2308,7 @@ func TestResolvePendingOAuthTargetUserIDNormalizesLegacySpacingAndCase(t *testin
 	require.Equal(t, existingUser.ID, resolvedUserID)
 }
 
-func TestBindOIDCOAuthLoginReturns2FAChallengeWhenUserHasTotp(t *testing.T) {
+func TestBindLinuxDoOAuthLoginReturns2FAChallengeWhenUserHasTotp(t *testing.T) {
 	totpCache := &oauthPendingFlowTotpCacheStub{}
 	handler, client := newOAuthPendingFlowTestHandlerWithDependencies(t, oauthPendingFlowTestHandlerOptions{
 		settingValues: map[string]string{
@@ -2295,14 +2339,14 @@ func TestBindOIDCOAuthLoginReturns2FAChallengeWhenUserHasTotp(t *testing.T) {
 	session, err := client.PendingAuthSession.Create().
 		SetSessionToken("bind-login-2fa-session-token").
 		SetIntent("adopt_existing_user_by_email").
-		SetProviderType("oidc").
+		SetProviderType("linuxdo").
 		SetProviderKey("https://issuer.example").
-		SetProviderSubject("oidc-bind-2fa-123").
+		SetProviderSubject("linuxdo-bind-2fa-123").
 		SetTargetUserID(existingUser.ID).
 		SetResolvedEmail(existingUser.Email).
 		SetBrowserSessionKey("bind-login-2fa-browser-session-key").
 		SetUpstreamIdentityClaims(map[string]any{
-			"suggested_display_name": "Bound OIDC User",
+			"suggested_display_name": "Bound LinuxDo User",
 			"suggested_avatar_url":   "https://cdn.example/bound.png",
 		}).
 		SetRedirectTo("/profile").
@@ -2313,13 +2357,13 @@ func TestBindOIDCOAuthLoginReturns2FAChallengeWhenUserHasTotp(t *testing.T) {
 	body := bytes.NewBufferString(`{"email":"owner@example.com","password":"secret-123","adopt_display_name":false,"adopt_avatar":false}`)
 	recorder := httptest.NewRecorder()
 	ginCtx, _ := gin.CreateTestContext(recorder)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/oauth/oidc/bind-login", body)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/oauth/linuxdo/bind-login", body)
 	req.Header.Set("Content-Type", "application/json")
 	req.AddCookie(&http.Cookie{Name: oauthPendingSessionCookieName, Value: encodeCookieValue(session.SessionToken)})
 	req.AddCookie(&http.Cookie{Name: oauthPendingBrowserCookieName, Value: encodeCookieValue("bind-login-2fa-browser-session-key")})
 	ginCtx.Request = req
 
-	handler.BindOIDCOAuthLogin(ginCtx)
+	handler.BindLinuxDoOAuthLogin(ginCtx)
 
 	require.Equal(t, http.StatusOK, recorder.Code)
 	data := decodeJSONResponseData(t, recorder)
@@ -2338,9 +2382,9 @@ func TestBindOIDCOAuthLoginReturns2FAChallengeWhenUserHasTotp(t *testing.T) {
 
 	identityCount, err := client.AuthIdentity.Query().
 		Where(
-			authidentity.ProviderTypeEQ("oidc"),
+			authidentity.ProviderTypeEQ("linuxdo"),
 			authidentity.ProviderKeyEQ("https://issuer.example"),
-			authidentity.ProviderSubjectEQ("oidc-bind-2fa-123"),
+			authidentity.ProviderSubjectEQ("linuxdo-bind-2fa-123"),
 		).
 		Count(ctx)
 	require.NoError(t, err)
@@ -2356,10 +2400,10 @@ func TestLogin2FACompletesPendingOAuthBindAndConsumesSession(t *testing.T) {
 	defaultSubAssigner := &oauthPendingFlowDefaultSubAssignerStub{}
 	handler, client := newOAuthPendingFlowTestHandlerWithDependencies(t, oauthPendingFlowTestHandlerOptions{
 		settingValues: map[string]string{
-			service.SettingKeyTotpEnabled:                           "true",
-			service.SettingKeyAuthSourceDefaultOIDCBalance:          "8",
-			service.SettingKeyAuthSourceDefaultOIDCConcurrency:      "2",
-			service.SettingKeyAuthSourceDefaultOIDCGrantOnFirstBind: "true",
+			service.SettingKeyTotpEnabled:                              "true",
+			service.SettingKeyAuthSourceDefaultLinuxDoBalance:          "8",
+			service.SettingKeyAuthSourceDefaultLinuxDoConcurrency:      "2",
+			service.SettingKeyAuthSourceDefaultLinuxDoGrantOnFirstBind: "true",
 		},
 		defaultSubAssigner: defaultSubAssigner,
 		totpCache:          totpCache,
@@ -2389,14 +2433,14 @@ func TestLogin2FACompletesPendingOAuthBindAndConsumesSession(t *testing.T) {
 	session, err := client.PendingAuthSession.Create().
 		SetSessionToken("login-2fa-pending-session-token").
 		SetIntent("adopt_existing_user_by_email").
-		SetProviderType("oidc").
+		SetProviderType("linuxdo").
 		SetProviderKey("https://issuer.example").
-		SetProviderSubject("oidc-login-2fa-123").
+		SetProviderSubject("linuxdo-login-2fa-123").
 		SetTargetUserID(existingUser.ID).
 		SetResolvedEmail(existingUser.Email).
 		SetBrowserSessionKey("login-2fa-browser-session-key").
 		SetUpstreamIdentityClaims(map[string]any{
-			"suggested_display_name": "Bound OIDC User",
+			"suggested_display_name": "Bound LinuxDo User",
 			"suggested_avatar_url":   "https://cdn.example/bound.png",
 		}).
 		SetRedirectTo("/profile").
@@ -2448,9 +2492,9 @@ func TestLogin2FACompletesPendingOAuthBindAndConsumesSession(t *testing.T) {
 
 	identity, err := client.AuthIdentity.Query().
 		Where(
-			authidentity.ProviderTypeEQ("oidc"),
+			authidentity.ProviderTypeEQ("linuxdo"),
 			authidentity.ProviderKeyEQ("https://issuer.example"),
-			authidentity.ProviderSubjectEQ("oidc-login-2fa-123"),
+			authidentity.ProviderSubjectEQ("linuxdo-login-2fa-123"),
 		).
 		Only(ctx)
 	require.NoError(t, err)
@@ -2468,7 +2512,7 @@ func TestLogin2FACompletesPendingOAuthBindAndConsumesSession(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 9.5, storedUser.Balance)
 	require.Equal(t, 6, storedUser.Concurrency)
-	require.Equal(t, 1, countProviderGrantRecords(t, client, existingUser.ID, "oidc", "first_bind"))
+	require.Equal(t, 1, countProviderGrantRecords(t, client, existingUser.ID, "linuxdo", "first_bind"))
 	require.Empty(t, defaultSubAssigner.calls)
 }
 
@@ -2665,10 +2709,6 @@ func boolSettingValue(v bool) string {
 		return "true"
 	}
 	return "false"
-}
-
-func boolPtr(v bool) *bool {
-	return &v
 }
 
 type oauthPendingFlowSettingRepoStub struct {

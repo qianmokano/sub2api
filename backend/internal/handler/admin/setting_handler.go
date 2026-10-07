@@ -31,15 +31,6 @@ func generateMenuItemID() (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
-func scopesContainOpenID(scopes string) bool {
-	for _, scope := range strings.Fields(strings.ToLower(strings.TrimSpace(scopes))) {
-		if scope == "openid" {
-			return true
-		}
-	}
-	return false
-}
-
 func firstNonEmpty(values ...string) string {
 	for _, value := range values {
 		if trimmed := strings.TrimSpace(value); trimmed != "" {
@@ -217,31 +208,10 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 		SSOEnabled:                                             settings.SSOEnabled,
 		SSOOnlyEnabled:                                         settings.SSOOnlyEnabled,
 		SSORegistrationEnabled:                                 settings.SSORegistrationEnabled,
+		SSOIssuerURL:                                           settings.SSOIssuerURL,
 		SSOOrganization:                                        settings.SSOOrganization,
 		SSOApplication:                                         settings.SSOApplication,
 		SSOAdminURL:                                            settings.SSOAdminURL,
-		OIDCConnectEnabled:                                     settings.OIDCConnectEnabled,
-		OIDCConnectProviderName:                                settings.OIDCConnectProviderName,
-		OIDCConnectClientID:                                    settings.OIDCConnectClientID,
-		OIDCConnectClientSecretConfigured:                      settings.OIDCConnectClientSecretConfigured,
-		OIDCConnectIssuerURL:                                   settings.OIDCConnectIssuerURL,
-		OIDCConnectDiscoveryURL:                                settings.OIDCConnectDiscoveryURL,
-		OIDCConnectAuthorizeURL:                                settings.OIDCConnectAuthorizeURL,
-		OIDCConnectTokenURL:                                    settings.OIDCConnectTokenURL,
-		OIDCConnectUserInfoURL:                                 settings.OIDCConnectUserInfoURL,
-		OIDCConnectJWKSURL:                                     settings.OIDCConnectJWKSURL,
-		OIDCConnectScopes:                                      settings.OIDCConnectScopes,
-		OIDCConnectRedirectURL:                                 settings.OIDCConnectRedirectURL,
-		OIDCConnectFrontendRedirectURL:                         settings.OIDCConnectFrontendRedirectURL,
-		OIDCConnectTokenAuthMethod:                             settings.OIDCConnectTokenAuthMethod,
-		OIDCConnectUsePKCE:                                     settings.OIDCConnectUsePKCE,
-		OIDCConnectValidateIDToken:                             settings.OIDCConnectValidateIDToken,
-		OIDCConnectAllowedSigningAlgs:                          settings.OIDCConnectAllowedSigningAlgs,
-		OIDCConnectClockSkewSeconds:                            settings.OIDCConnectClockSkewSeconds,
-		OIDCConnectRequireEmailVerified:                        settings.OIDCConnectRequireEmailVerified,
-		OIDCConnectUserInfoEmailPath:                           settings.OIDCConnectUserInfoEmailPath,
-		OIDCConnectUserInfoIDPath:                              settings.OIDCConnectUserInfoIDPath,
-		OIDCConnectUserInfoUsernamePath:                        settings.OIDCConnectUserInfoUsernamePath,
 		GitHubOAuthEnabled:                                     settings.GitHubOAuthEnabled,
 		GitHubOAuthClientID:                                    settings.GitHubOAuthClientID,
 		GitHubOAuthClientSecretConfigured:                      settings.GitHubOAuthClientSecretConfigured,

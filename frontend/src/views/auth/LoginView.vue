@@ -99,6 +99,8 @@
           />
         </div>
 
+        <SSOCaptcha v-if="ssoMode" v-model="passportCaptchaAnswer" :challenge="passportCaptchaChallenge" @refresh="refreshPassportCaptcha" />
+
         <!-- Submit Button -->
         <button
           type="submit"
@@ -187,13 +189,6 @@
             :show-divider="false"
             @start="handleOAuthStart"
           />
-          <OidcOAuthSection
-            v-if="oidcOAuthEnabled"
-            :disabled="authActionDisabled"
-            :provider-name="oidcOAuthProviderName"
-            :show-divider="false"
-            @start="handleOAuthStart"
-          />
         </div>
       </form>
     </div>
@@ -230,11 +225,12 @@ import { useI18n } from 'vue-i18n'
 import { AuthLayout } from '@/components/layout'
 import LinuxDoOAuthSection from '@/components/auth/LinuxDoOAuthSection.vue'
 import DingTalkOAuthSection from '@/components/auth/DingTalkOAuthSection.vue'
-import OidcOAuthSection from '@/components/auth/OidcOAuthSection.vue'
 import WechatOAuthSection from '@/components/auth/WechatOAuthSection.vue'
 import EmailOAuthButtons from '@/components/auth/EmailOAuthButtons.vue'
 import LoginAgreementPrompt from '@/components/auth/LoginAgreementPrompt.vue'
 import TotpLoginModal from '@/components/auth/TotpLoginModal.vue'
+import SSOCaptcha from '@/components/auth/SSOCaptcha.vue'
+import { useSSOCaptcha } from '@/composables/useSSOCaptcha'
 import SSOMFAForm from '@/components/auth/SSOMFAForm.vue'
 import { isSSOMFARequired, type SSOChallenge, type SSOLoginResponse } from '@/api/sso'
 import Icon from '@/components/icons/Icon.vue'
@@ -275,8 +271,9 @@ const publicSettingsLoaded = ref<boolean>(false)
 const ssoEnabled = ref(false)
 const ssoMode = computed(() => ssoEnabled.value && router.currentRoute.value.query.local !== '1')
 const ssoPasswordResetURL = ref('')
+const passportCaptcha = useSSOCaptcha()
+const { challenge: passportCaptchaChallenge, answer: passportCaptchaAnswer } = passportCaptcha
 const ssoChallenge = ref<SSOChallenge | null>(null)
-const oidcRedirect = ref('')
 
 // Public settings
 const registrationEnabled = ref<boolean>(false)
@@ -293,8 +290,6 @@ const linuxdoOAuthEnabled = ref<boolean>(false)
 const dingtalkOAuthEnabled = ref<boolean>(false)
 const wechatOAuthEnabled = ref<boolean>(false)
 const backendModeEnabled = ref<boolean>(false)
-const oidcOAuthEnabled = ref<boolean>(false)
-const oidcOAuthProviderName = ref<string>('OIDC')
 const githubOAuthEnabled = ref<boolean>(false)
 const googleOAuthEnabled = ref<boolean>(false)
 const passwordResetEnabled = ref<boolean>(false)
@@ -367,7 +362,6 @@ const showOAuthLogin = computed(
     (linuxdoOAuthEnabled.value ||
       dingtalkOAuthEnabled.value ||
       wechatOAuthEnabled.value ||
-      oidcOAuthEnabled.value ||
       githubOAuthEnabled.value ||
       googleOAuthEnabled.value)
 )
@@ -407,8 +401,6 @@ onMounted(async () => {
     dingtalkOAuthEnabled.value = settings.dingtalk_oauth_enabled ?? false
     wechatOAuthEnabled.value = isWeChatWebOAuthEnabled(settings)
     backendModeEnabled.value = settings.backend_mode_enabled
-    oidcOAuthEnabled.value = settings.oidc_oauth_enabled
-    oidcOAuthProviderName.value = settings.oidc_oauth_provider_name || 'OIDC'
     githubOAuthEnabled.value = settings.github_oauth_enabled
     googleOAuthEnabled.value = settings.google_oauth_enabled
     backendModeEnabled.value = settings.backend_mode_enabled
@@ -419,15 +411,6 @@ onMounted(async () => {
       githubOAuthEnabled.value = googleOAuthEnabled.value = passkeyEnabled.value = false
     }
     applyLoginAgreementSettings(settings)
-    const fragment = new URLSearchParams(window.location.hash.slice(1))
-    if (fragment.get('sso_totp_token')) {
-      totpTempToken.value = fragment.get('sso_totp_token') || ''
-      totpUserEmailMasked.value = fragment.get('email_masked') || ''
-      const target = fragment.get('redirect') || '/dashboard'
-      oidcRedirect.value = target.startsWith('/') && !target.startsWith('//') && !target.includes('://') ? target : '/dashboard'
-      window.history.replaceState(null, '', window.location.pathname + window.location.search)
-      show2FAModal.value = true
-    }
   } catch (error) {
     console.error('Failed to load public settings:', error)
     loginAgreementEnabled.value = false
@@ -584,6 +567,13 @@ function validateForm(): boolean {
 
 // ==================== Form Handlers ====================
 
+async function refreshPassportCaptcha() {
+  try { await passportCaptcha.refresh('login', formData.email) }
+  catch (error) { errorMessage.value = extractI18nErrorMessage(error, t, 'auth.errors', t('auth.loginFailed')) }
+}
+
+watch(() => formData.email, () => passportCaptcha.invalidate())
+
 async function handleLogin(): Promise<void> {
   // Clear previous error
   errorMessage.value = ''
@@ -600,6 +590,10 @@ async function handleLogin(): Promise<void> {
   isLoading.value = true
 
   try {
+    if (ssoMode.value && !(await passportCaptcha.ensure('login', formData.email))) {
+      errorMessage.value = t('auth.completeVerification')
+      return
+    }
     // Call auth store login（阿里云 captchaVerifyParam 复用 turnstile_token 字段）
     const credentials = {
       email: formData.email,
@@ -612,8 +606,9 @@ async function handleLogin(): Promise<void> {
         : undefined
     }
     const response = ssoMode.value
-      ? await authStore.loginSSO({ ...credentials, account: formData.email })
+      ? await authStore.loginSSO({ ...credentials, account: formData.email, captcha: passportCaptcha.proof() })
       : await authStore.login(credentials)
+    passportCaptcha.invalidate()
     if (isSSOMFARequired(response)) {
       ssoChallenge.value = response.challenge
       formData.password = ''
@@ -638,6 +633,7 @@ async function handleLogin(): Promise<void> {
     const redirectTo = (router.currentRoute.value.query.redirect as string) || '/dashboard'
     await router.push(redirectTo)
   } catch (error: unknown) {
+    passportCaptcha.invalidate()
     errorMessage.value = extractI18nErrorMessage(error, t, 'auth.errors', t('auth.loginFailed'))
 
     // Also show error toast
@@ -710,6 +706,7 @@ async function handleSSOMFA(method: string, passcode: string): Promise<void> {
     appStore.showSuccess(t('auth.loginSuccess'))
     await router.push((router.currentRoute.value.query.redirect as string) || '/dashboard')
   } catch (error) {
+    passportCaptcha.invalidate()
     errorMessage.value = extractI18nErrorMessage(error, t, 'auth.errors', t('auth.loginFailed'))
   } finally {
     isLoading.value = false
@@ -769,7 +766,7 @@ async function handle2FAVerify(code: string): Promise<void> {
     appStore.showSuccess(t('auth.loginSuccess'))
 
     // Redirect to dashboard or intended route
-    const redirectTo = oidcRedirect.value || (router.currentRoute.value.query.redirect as string) || '/dashboard'
+    const redirectTo = (router.currentRoute.value.query.redirect as string) || '/dashboard'
     await router.push(redirectTo)
   } catch (error: unknown) {
     const err = error as { message?: string; response?: { data?: { message?: string } } }

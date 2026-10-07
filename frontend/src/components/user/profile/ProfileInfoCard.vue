@@ -156,8 +156,6 @@
             :user="user"
             :linuxdo-enabled="linuxdoEnabled"
             :dingtalk-enabled="dingtalkEnabled"
-            :oidc-enabled="oidcEnabled"
-            :oidc-provider-name="oidcProviderName"
             :wechat-enabled="wechatEnabled"
             :wechat-open-enabled="wechatOpenEnabled"
             :wechat-mp-enabled="wechatMpEnabled"
@@ -210,8 +208,6 @@ const props = withDefaults(defineProps<{
   ssoAccountUrl?: string
   linuxdoEnabled?: boolean
   dingtalkEnabled?: boolean
-  oidcEnabled?: boolean
-  oidcProviderName?: string
   wechatEnabled?: boolean
   wechatOpenEnabled?: boolean
   wechatMpEnabled?: boolean
@@ -220,8 +216,6 @@ const props = withDefaults(defineProps<{
   managedCredentials: false,
   ssoAccountUrl: '',
   dingtalkEnabled: false,
-  oidcEnabled: false,
-  oidcProviderName: 'OIDC',
   wechatEnabled: false,
   wechatOpenEnabled: undefined,
   wechatMpEnabled: undefined,
@@ -286,7 +280,7 @@ const providerLabels = computed<Record<UserAuthProvider, string>>(() => ({
   email: t('profile.authBindings.providers.email'),
   linuxdo: t('profile.authBindings.providers.linuxdo'),
   dingtalk: t('profile.authBindings.providers.dingtalk'),
-  oidc: t('profile.authBindings.providers.oidc', { providerName: props.oidcProviderName }),
+  oidc: t('profile.authBindings.providers.oidc'),
   wechat: t('profile.authBindings.providers.wechat'),
   github: 'GitHub',
   google: 'Google'

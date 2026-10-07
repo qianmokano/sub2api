@@ -88,7 +88,6 @@ function simulateGuard(
       const callbackPaths = [
         '/auth/callback',
         '/auth/linuxdo/callback',
-        '/auth/oidc/callback',
         '/auth/wechat/callback',
         '/auth/wechat/payment/callback',
       ]
@@ -136,7 +135,6 @@ function simulateGuard(
     const callbackPaths = [
       '/auth/callback',
       '/auth/linuxdo/callback',
-      '/auth/oidc/callback',
       '/auth/wechat/callback',
       '/auth/wechat/payment/callback',
     ]

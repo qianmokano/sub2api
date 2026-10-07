@@ -3,13 +3,13 @@
     <div class="space-y-6">
       <div class="text-center">
         <h2 class="text-2xl font-bold text-gray-900 dark:text-white">
-          {{ t('auth.oidc.callbackTitle', { providerName }) }}
+          {{ t('auth.providerOAuth.callbackTitle', { providerName }) }}
         </h2>
         <p class="mt-2 text-sm text-gray-500 dark:text-dark-400">
           {{
             isProcessing
-              ? t('auth.oidc.callbackProcessing', { providerName })
-              : t('auth.oidc.callbackHint')
+              ? t('auth.providerOAuth.callbackProcessing', { providerName })
+              : t('auth.providerOAuth.callbackHint')
           }}
         </p>
       </div>
@@ -79,7 +79,7 @@
 
           <template v-if="needsInvitation">
             <p class="text-sm text-gray-700 dark:text-gray-300">
-              {{ t('auth.oidc.invitationRequired', { providerName }) }}
+              {{ t('auth.providerOAuth.invitationRequired', { providerName }) }}
             </p>
             <div>
               <input
@@ -98,8 +98,8 @@
             >
               {{
                 isSubmitting
-                  ? t('auth.oidc.completing')
-                : t('auth.oidc.completeRegistration')
+                  ? t('auth.providerOAuth.completing')
+                : t('auth.providerOAuth.completeRegistration')
               }}
             </button>
 
@@ -814,7 +814,7 @@ async function finalizeCompletion(completion: PendingOAuthExchangeResponse, redi
   }
 
   if (!isOAuthLoginCompletion(completion)) {
-    throw new Error(t('auth.oidc.callbackMissingToken'))
+    throw new Error(t('auth.providerOAuth.callbackMissingToken'))
   }
 
   persistOAuthTokenContext(completion)
@@ -886,7 +886,7 @@ async function handleSubmitInvitation() {
   } catch (e: unknown) {
     const err = e as { message?: string; response?: { data?: { message?: string } } }
     invitationError.value =
-      err.response?.data?.message || err.message || t('auth.oidc.completeRegistrationFailed')
+      err.response?.data?.message || err.message || t('auth.providerOAuth.completeRegistrationFailed')
   } finally {
     isSubmitting.value = false
   }

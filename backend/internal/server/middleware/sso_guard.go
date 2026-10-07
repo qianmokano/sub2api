@@ -18,6 +18,11 @@ func SSOAuthGuard(settings *service.SettingService) gin.HandlerFunc {
 		}
 		policy, err := settings.GetSSOSettings(c.Request.Context())
 		if err != nil {
+			path := strings.TrimPrefix(c.Request.URL.Path, "/api/v1/auth")
+			if path == "/login" || path == "/login/2fa" || path == "/refresh" || path == "/logout" {
+				c.Next()
+				return
+			}
 			response.ErrorFrom(c, err)
 			c.Abort()
 			return
@@ -36,9 +41,7 @@ func ssoAllowsAuthPath(path string) bool {
 	switch path {
 	case "/login", "/login/2fa", "/refresh", "/logout", "/me", "/revoke-all-sessions":
 		return true
-	case "/sso/password-login", "/sso/mfa", "/sso/register/send-code", "/sso/register":
-		return true
-	case "/oauth/oidc/start", "/oauth/oidc/callback":
+	case "/sso/captcha", "/sso/password-login", "/sso/mfa", "/sso/register/send-code", "/sso/register":
 		return true
 	case "/oauth/wechat/payment/start", "/oauth/wechat/payment/callback":
 		return true
@@ -58,13 +61,17 @@ func SSOUserGuard(settings *service.SettingService) gin.HandlerFunc {
 			c.Next()
 			return
 		}
+		role, _ := GetUserRoleFromContext(c)
+		if role == service.RoleAdmin {
+			c.Next()
+			return
+		}
 		policy, err := settings.GetSSOSettings(c.Request.Context())
 		if err != nil {
 			response.ErrorFrom(c, err)
 			c.Abort()
 			return
 		}
-		role, _ := GetUserRoleFromContext(c)
 		// Existing local TOTP is still needed for step-up and authentication.
 		readOnlyTOTP := (c.Request.Method == "GET" && strings.HasPrefix(path, "/api/v1/user/totp/")) || path == "/api/v1/user/totp/step-up"
 		if !policy.OnlyEnabled || role == service.RoleAdmin || readOnlyTOTP {

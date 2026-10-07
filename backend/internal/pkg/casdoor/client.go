@@ -11,12 +11,14 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/Wei-Shaw/sub2api/internal/pkg/casdoorcaptcha"
 )
 
 var (
 	ErrCredentials = errors.New("invalid credentials")
 	ErrFrozen      = errors.New("account temporarily locked")
-	ErrCaptcha     = errors.New("use the identity provider login to complete captcha")
+	ErrCaptcha     = errors.New("passport captcha is required")
 	ErrMFACode     = errors.New("invalid MFA code")
 	ErrCode        = errors.New("invalid registration code")
 	ErrEmailExists = errors.New("email already exists")
@@ -55,13 +57,18 @@ type Session struct {
 }
 
 type Client struct {
-	config    Config
-	transport http.RoundTripper
+	config       Config
+	transport    http.RoundTripper
+	captchaStore casdoorcaptcha.Store
 }
 
-func New(config Config, transport http.RoundTripper) *Client {
+func New(config Config, transport http.RoundTripper, stores ...casdoorcaptcha.Store) *Client {
 	config.Issuer = strings.TrimRight(strings.TrimSpace(config.Issuer), "/")
-	return &Client{config: config, transport: transport}
+	c := &Client{config: config, transport: transport}
+	if len(stores) > 0 {
+		c.captchaStore = stores[0]
+	}
+	return c
 }
 
 func (c *Client) httpClient(session *Session) *http.Client {
@@ -122,10 +129,31 @@ func (c *Client) loginPayload() map[string]any {
 	return map[string]any{"type": "login", "application": application, "organization": c.config.Organization}
 }
 
-func (c *Client) Login(ctx context.Context, account, password string) (*Identity, *Session, error) {
+func (c *Client) captchaClient() *casdoorcaptcha.Client {
+	return casdoorcaptcha.New(casdoorcaptcha.Config{Issuer: c.config.Issuer, Organization: c.config.Organization, Application: c.config.Application}, c.captchaStore, c.httpClient(nil))
+}
+
+func (c *Client) PrepareCaptcha(ctx context.Context, action, account string) (*casdoorcaptcha.Challenge, error) {
+	return c.captchaClient().Prepare(ctx, action, account)
+}
+
+func (c *Client) resolveCaptcha(ctx context.Context, action, account string, proofs []*casdoorcaptcha.Proof) (casdoorcaptcha.Fields, error) {
+	var proof *casdoorcaptcha.Proof
+	if len(proofs) > 0 {
+		proof = proofs[0]
+	}
+	return c.captchaClient().Resolve(ctx, action, account, proof)
+}
+
+func (c *Client) Login(ctx context.Context, account, password string, proofs ...*casdoorcaptcha.Proof) (*Identity, *Session, error) {
 	client := c.httpClient(nil)
 	payload := c.loginPayload()
 	payload["username"], payload["password"], payload["autoSignin"] = strings.TrimSpace(account), password, true
+	fields, err := c.resolveCaptcha(ctx, casdoorcaptcha.ActionLogin, account, proofs)
+	if err != nil {
+		return nil, nil, err
+	}
+	fields.ApplyJSON(payload)
 	result, err := c.post(ctx, client, "/api/login", payload)
 	if err != nil {
 		return nil, nil, err
@@ -205,8 +233,13 @@ func (c *Client) account(ctx context.Context, client *http.Client) (*Identity, e
 	return &identity, nil
 }
 
-func (c *Client) SendCode(ctx context.Context, email string) error {
+func (c *Client) SendCode(ctx context.Context, email string, proofs ...*casdoorcaptcha.Proof) error {
+	fields, err := c.resolveCaptcha(ctx, casdoorcaptcha.ActionSendCode, email, proofs)
+	if err != nil {
+		return err
+	}
 	form := url.Values{"dest": {email}, "type": {"email"}, "applicationId": {c.config.Application}, "method": {"signup"}, "captchaType": {"none"}}
+	fields.ApplyForm(form)
 	result, err := c.request(ctx, c.httpClient(nil), http.MethodPost, "/api/send-verification-code", "application/x-www-form-urlencoded", form.Encode())
 	if err != nil {
 		return err
@@ -215,6 +248,9 @@ func (c *Client) SendCode(ctx context.Context, email string) error {
 		return nil
 	}
 	message := strings.ToLower(result.Msg)
+	if strings.Contains(message, "captcha") || strings.Contains(message, "turing test") {
+		return ErrCaptcha
+	}
 	if strings.Contains(message, "already exists") {
 		return ErrEmailExists
 	}
@@ -224,12 +260,17 @@ func (c *Client) SendCode(ctx context.Context, email string) error {
 	return ErrUnavailable
 }
 
-func (c *Client) Register(ctx context.Context, email, password, code, displayName, username string) (*Identity, error) {
+func (c *Client) Register(ctx context.Context, email, password, code, displayName, username string, proofs ...*casdoorcaptcha.Proof) (*Identity, error) {
 	client := c.httpClient(nil)
 	payload := c.loginPayload()
 	delete(payload, "type")
 	payload["email"], payload["password"], payload["emailCode"] = email, password, code
 	payload["name"], payload["username"], payload["autoSignin"] = displayName, username, true
+	fields, err := c.resolveCaptcha(ctx, casdoorcaptcha.ActionRegister, email, proofs)
+	if err != nil {
+		return nil, err
+	}
+	fields.ApplyJSON(payload)
 	result, err := c.post(ctx, client, "/api/signup", payload)
 	if err != nil {
 		return nil, err
@@ -238,6 +279,9 @@ func (c *Client) Register(ctx context.Context, email, password, code, displayNam
 		return c.account(ctx, client)
 	}
 	message := strings.ToLower(result.Msg)
+	if strings.Contains(message, "captcha") || strings.Contains(message, "turing test") {
+		return nil, ErrCaptcha
+	}
 	if strings.Contains(message, "code") {
 		return nil, ErrCode
 	}

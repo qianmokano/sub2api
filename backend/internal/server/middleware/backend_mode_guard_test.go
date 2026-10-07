@@ -241,10 +241,10 @@ func TestBackendModeAuthGuard(t *testing.T) {
 			wantStatus: http.StatusForbidden,
 		},
 		{
-			name:       "enabled_allows_oidc_oauth_callback",
+			name:       "enabled_blocks_removed_oidc_oauth_callback",
 			enabled:    "true",
 			path:       "/api/v1/auth/oauth/oidc/callback",
-			wantStatus: http.StatusOK,
+			wantStatus: http.StatusForbidden,
 		},
 		{
 			name:       "enabled_blocks_github_oauth_start",
@@ -337,10 +337,10 @@ func TestBackendModeAuthGuard(t *testing.T) {
 			wantStatus: http.StatusOK,
 		},
 		{
-			name:       "enabled_allows_provider_bind_login",
+			name:       "enabled_blocks_removed_oidc_bind_login",
 			enabled:    "true",
 			path:       "/api/v1/auth/oauth/oidc/bind-login",
-			wantStatus: http.StatusOK,
+			wantStatus: http.StatusForbidden,
 		},
 		{
 			name:       "enabled_allows_provider_create_account",

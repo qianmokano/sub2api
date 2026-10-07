@@ -30,16 +30,6 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		return fmt.Errorf("check existing settings: %w", err)
 	}
 
-	oidcUsePKCEDefault := true
-	oidcValidateIDTokenDefault := true
-	if s != nil && s.cfg != nil {
-		if s.cfg.OIDC.UsePKCEExplicit {
-			oidcUsePKCEDefault = s.cfg.OIDC.UsePKCE
-		}
-		if s.cfg.OIDC.ValidateIDTokenExplicit {
-			oidcValidateIDTokenDefault = s.cfg.OIDC.ValidateIDToken
-		}
-	}
 	loginAgreementDocumentsJSON, err := marshalLoginAgreementDocuments(defaultLoginAgreementDocuments())
 	if err != nil {
 		return err
@@ -55,11 +45,6 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 
 	// 初始化默认设置
 	defaults := map[string]string{
-		SettingKeySSOEnabled:                                "false",
-		SettingKeySSOOnlyEnabled:                            "false",
-		SettingKeySSORegistrationEnabled:                    "false",
-		SettingKeySSOOrganization:                           "kano",
-		SettingKeySSOApplication:                            "admin/sub2api",
 		SettingKeyRegistrationEnabled:                       "true",
 		SettingKeyEmailVerifyEnabled:                        "false",
 		SettingKeyRegistrationEmailSuffixWhitelist:          "[]",
@@ -106,28 +91,6 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		SettingKeyGoogleOAuthClientSecret:                   "",
 		SettingKeyGoogleOAuthRedirectURL:                    "",
 		SettingKeyGoogleOAuthFrontendRedirectURL:            defaultGoogleOAuthFrontend,
-		SettingKeyOIDCConnectEnabled:                        "false",
-		SettingKeyOIDCConnectProviderName:                   "OIDC",
-		SettingKeyOIDCConnectClientID:                       "",
-		SettingKeyOIDCConnectClientSecret:                   "",
-		SettingKeyOIDCConnectIssuerURL:                      "",
-		SettingKeyOIDCConnectDiscoveryURL:                   "",
-		SettingKeyOIDCConnectAuthorizeURL:                   "",
-		SettingKeyOIDCConnectTokenURL:                       "",
-		SettingKeyOIDCConnectUserInfoURL:                    "",
-		SettingKeyOIDCConnectJWKSURL:                        "",
-		SettingKeyOIDCConnectScopes:                         "openid email profile",
-		SettingKeyOIDCConnectRedirectURL:                    "",
-		SettingKeyOIDCConnectFrontendRedirectURL:            "/auth/oidc/callback",
-		SettingKeyOIDCConnectTokenAuthMethod:                "client_secret_post",
-		SettingKeyOIDCConnectUsePKCE:                        strconv.FormatBool(oidcUsePKCEDefault),
-		SettingKeyOIDCConnectValidateIDToken:                strconv.FormatBool(oidcValidateIDTokenDefault),
-		SettingKeyOIDCConnectAllowedSigningAlgs:             "RS256,ES256,PS256",
-		SettingKeyOIDCConnectClockSkewSeconds:               "120",
-		SettingKeyOIDCConnectRequireEmailVerified:           "false",
-		SettingKeyOIDCConnectUserInfoEmailPath:              "",
-		SettingKeyOIDCConnectUserInfoIDPath:                 "",
-		SettingKeyOIDCConnectUserInfoUsernamePath:           "",
 		SettingKeyDefaultConcurrency:                        strconv.Itoa(s.cfg.Default.UserConcurrency),
 		SettingKeyDefaultBalance:                            strconv.FormatFloat(s.cfg.Default.UserBalance, 'f', 8, 64),
 		SettingKeyAffiliateRebateRate:                       strconv.FormatFloat(AffiliateRebateRateDefault, 'f', 8, 64),
@@ -382,8 +345,9 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 		SSOAdminURL:                            s.ssoAdminURL(settings),
 		SSOOnlyEnabled:                         settings[SettingKeySSOOnlyEnabled] == "true",
 		SSORegistrationEnabled:                 settings[SettingKeySSORegistrationEnabled] == "true",
-		SSOOrganization:                        firstNonEmpty(settings[SettingKeySSOOrganization], "kano"),
-		SSOApplication:                         firstNonEmpty(settings[SettingKeySSOApplication], "admin/sub2api"),
+		SSOIssuerURL:                           s.ssoSettingValue(settings, SettingKeySSOIssuerURL),
+		SSOOrganization:                        s.ssoSettingValue(settings, SettingKeySSOOrganization),
+		SSOApplication:                         s.ssoSettingValue(settings, SettingKeySSOApplication),
 	}
 	result.TableDefaultPageSize, result.TablePageSizeOptions = parseTablePreferences(
 		settings[SettingKeyTableDefaultPageSize],
@@ -605,138 +569,6 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 			result.DingTalkConnectSyncDeptAttrName = "钉钉部门"
 		}
 	}
-
-	// Generic OIDC 设置：
-	// - 兼容 config.yaml/env
-	// - 支持后台系统设置覆盖并持久化（存储于 DB）
-	oidcBase := config.OIDCConnectConfig{}
-	if s.cfg != nil {
-		oidcBase = s.cfg.OIDC
-	}
-
-	if raw, ok := settings[SettingKeyOIDCConnectEnabled]; ok {
-		result.OIDCConnectEnabled = raw == "true"
-	} else {
-		result.OIDCConnectEnabled = oidcBase.Enabled
-	}
-
-	if v, ok := settings[SettingKeyOIDCConnectProviderName]; ok && strings.TrimSpace(v) != "" {
-		result.OIDCConnectProviderName = strings.TrimSpace(v)
-	} else {
-		result.OIDCConnectProviderName = strings.TrimSpace(oidcBase.ProviderName)
-	}
-	if result.OIDCConnectProviderName == "" {
-		result.OIDCConnectProviderName = "OIDC"
-	}
-
-	if v, ok := settings[SettingKeyOIDCConnectClientID]; ok && strings.TrimSpace(v) != "" {
-		result.OIDCConnectClientID = strings.TrimSpace(v)
-	} else {
-		result.OIDCConnectClientID = strings.TrimSpace(oidcBase.ClientID)
-	}
-	if v, ok := settings[SettingKeyOIDCConnectIssuerURL]; ok && strings.TrimSpace(v) != "" {
-		result.OIDCConnectIssuerURL = strings.TrimSpace(v)
-	} else {
-		result.OIDCConnectIssuerURL = strings.TrimSpace(oidcBase.IssuerURL)
-	}
-	if v, ok := settings[SettingKeyOIDCConnectDiscoveryURL]; ok && strings.TrimSpace(v) != "" {
-		result.OIDCConnectDiscoveryURL = strings.TrimSpace(v)
-	} else {
-		result.OIDCConnectDiscoveryURL = strings.TrimSpace(oidcBase.DiscoveryURL)
-	}
-	if v, ok := settings[SettingKeyOIDCConnectAuthorizeURL]; ok && strings.TrimSpace(v) != "" {
-		result.OIDCConnectAuthorizeURL = strings.TrimSpace(v)
-	} else {
-		result.OIDCConnectAuthorizeURL = strings.TrimSpace(oidcBase.AuthorizeURL)
-	}
-	if v, ok := settings[SettingKeyOIDCConnectTokenURL]; ok && strings.TrimSpace(v) != "" {
-		result.OIDCConnectTokenURL = strings.TrimSpace(v)
-	} else {
-		result.OIDCConnectTokenURL = strings.TrimSpace(oidcBase.TokenURL)
-	}
-	if v, ok := settings[SettingKeyOIDCConnectUserInfoURL]; ok && strings.TrimSpace(v) != "" {
-		result.OIDCConnectUserInfoURL = strings.TrimSpace(v)
-	} else {
-		result.OIDCConnectUserInfoURL = strings.TrimSpace(oidcBase.UserInfoURL)
-	}
-	if v, ok := settings[SettingKeyOIDCConnectJWKSURL]; ok && strings.TrimSpace(v) != "" {
-		result.OIDCConnectJWKSURL = strings.TrimSpace(v)
-	} else {
-		result.OIDCConnectJWKSURL = strings.TrimSpace(oidcBase.JWKSURL)
-	}
-	if v, ok := settings[SettingKeyOIDCConnectScopes]; ok && strings.TrimSpace(v) != "" {
-		result.OIDCConnectScopes = strings.TrimSpace(v)
-	} else {
-		result.OIDCConnectScopes = strings.TrimSpace(oidcBase.Scopes)
-	}
-	if v, ok := settings[SettingKeyOIDCConnectRedirectURL]; ok && strings.TrimSpace(v) != "" {
-		result.OIDCConnectRedirectURL = strings.TrimSpace(v)
-	} else {
-		result.OIDCConnectRedirectURL = strings.TrimSpace(oidcBase.RedirectURL)
-	}
-	if v, ok := settings[SettingKeyOIDCConnectFrontendRedirectURL]; ok && strings.TrimSpace(v) != "" {
-		result.OIDCConnectFrontendRedirectURL = strings.TrimSpace(v)
-	} else {
-		result.OIDCConnectFrontendRedirectURL = strings.TrimSpace(oidcBase.FrontendRedirectURL)
-	}
-	if v, ok := settings[SettingKeyOIDCConnectTokenAuthMethod]; ok && strings.TrimSpace(v) != "" {
-		result.OIDCConnectTokenAuthMethod = strings.ToLower(strings.TrimSpace(v))
-	} else {
-		result.OIDCConnectTokenAuthMethod = strings.ToLower(strings.TrimSpace(oidcBase.TokenAuthMethod))
-	}
-	if raw, ok := settings[SettingKeyOIDCConnectUsePKCE]; ok {
-		result.OIDCConnectUsePKCE = raw == "true"
-	} else {
-		result.OIDCConnectUsePKCE = oidcUsePKCECompatibilityDefault(oidcBase)
-	}
-	if raw, ok := settings[SettingKeyOIDCConnectValidateIDToken]; ok {
-		result.OIDCConnectValidateIDToken = raw == "true"
-	} else {
-		result.OIDCConnectValidateIDToken = oidcValidateIDTokenCompatibilityDefault(oidcBase)
-	}
-	if v, ok := settings[SettingKeyOIDCConnectAllowedSigningAlgs]; ok && strings.TrimSpace(v) != "" {
-		result.OIDCConnectAllowedSigningAlgs = strings.TrimSpace(v)
-	} else {
-		result.OIDCConnectAllowedSigningAlgs = strings.TrimSpace(oidcBase.AllowedSigningAlgs)
-	}
-	clockSkewSet := false
-	if raw, ok := settings[SettingKeyOIDCConnectClockSkewSeconds]; ok && strings.TrimSpace(raw) != "" {
-		if parsed, err := strconv.Atoi(strings.TrimSpace(raw)); err == nil {
-			result.OIDCConnectClockSkewSeconds = parsed
-			clockSkewSet = true
-		}
-	}
-	if !clockSkewSet {
-		result.OIDCConnectClockSkewSeconds = oidcBase.ClockSkewSeconds
-	}
-	if !clockSkewSet && result.OIDCConnectClockSkewSeconds == 0 {
-		result.OIDCConnectClockSkewSeconds = 120
-	}
-	if raw, ok := settings[SettingKeyOIDCConnectRequireEmailVerified]; ok {
-		result.OIDCConnectRequireEmailVerified = raw == "true"
-	} else {
-		result.OIDCConnectRequireEmailVerified = oidcBase.RequireEmailVerified
-	}
-	if v, ok := settings[SettingKeyOIDCConnectUserInfoEmailPath]; ok {
-		result.OIDCConnectUserInfoEmailPath = strings.TrimSpace(v)
-	} else {
-		result.OIDCConnectUserInfoEmailPath = strings.TrimSpace(oidcBase.UserInfoEmailPath)
-	}
-	if v, ok := settings[SettingKeyOIDCConnectUserInfoIDPath]; ok {
-		result.OIDCConnectUserInfoIDPath = strings.TrimSpace(v)
-	} else {
-		result.OIDCConnectUserInfoIDPath = strings.TrimSpace(oidcBase.UserInfoIDPath)
-	}
-	if v, ok := settings[SettingKeyOIDCConnectUserInfoUsernamePath]; ok {
-		result.OIDCConnectUserInfoUsernamePath = strings.TrimSpace(v)
-	} else {
-		result.OIDCConnectUserInfoUsernamePath = strings.TrimSpace(oidcBase.UserInfoUsernamePath)
-	}
-	result.OIDCConnectClientSecret = strings.TrimSpace(settings[SettingKeyOIDCConnectClientSecret])
-	if result.OIDCConnectClientSecret == "" {
-		result.OIDCConnectClientSecret = strings.TrimSpace(oidcBase.ClientSecret)
-	}
-	result.OIDCConnectClientSecretConfigured = result.OIDCConnectClientSecret != ""
 
 	gitHubEffective := s.effectiveEmailOAuthConfig(settings, "github")
 	result.GitHubOAuthEnabled = gitHubEffective.Enabled

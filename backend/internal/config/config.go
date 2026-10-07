@@ -80,7 +80,9 @@ type Config struct {
 	WebAuthn                WebAuthnConfig                `mapstructure:"webauthn"`
 	LinuxDo                 LinuxDoConnectConfig          `mapstructure:"linuxdo_connect"`
 	WeChat                  WeChatConnectConfig           `mapstructure:"wechat_connect"`
-	OIDC                    OIDCConnectConfig             `mapstructure:"oidc_connect"`
+	SSO                     SSOConfig                     `mapstructure:"sso"`
+	SSOConfigured           map[string]bool               `mapstructure:"-" yaml:"-"`
+	LegacySSOIssuer         *string                       `mapstructure:"-" yaml:"-"`
 	DingTalk                DingTalkConnectConfig         `mapstructure:"dingtalk_connect"`
 	GitHubOAuth             EmailOAuthProviderConfig      `mapstructure:"github_oauth"`
 	GoogleOAuth             EmailOAuthProviderConfig      `mapstructure:"google_oauth"`
@@ -339,36 +341,6 @@ type WeChatConnectConfig struct {
 	FrontendRedirectURL string `mapstructure:"frontend_redirect_url"`
 }
 
-type OIDCConnectConfig struct {
-	Enabled                 bool   `mapstructure:"enabled"`
-	ProviderName            string `mapstructure:"provider_name"` // 显示名: "Keycloak" 等
-	ClientID                string `mapstructure:"client_id"`
-	ClientSecret            string `mapstructure:"client_secret"`
-	IssuerURL               string `mapstructure:"issuer_url"`
-	DiscoveryURL            string `mapstructure:"discovery_url"`
-	AuthorizeURL            string `mapstructure:"authorize_url"`
-	TokenURL                string `mapstructure:"token_url"`
-	UserInfoURL             string `mapstructure:"userinfo_url"`
-	JWKSURL                 string `mapstructure:"jwks_url"`
-	Scopes                  string `mapstructure:"scopes"`                // 默认 "openid email profile"
-	RedirectURL             string `mapstructure:"redirect_url"`          // 后端回调地址（需在提供方后台登记）
-	FrontendRedirectURL     string `mapstructure:"frontend_redirect_url"` // 前端接收 token 的路由（默认：/auth/oidc/callback）
-	TokenAuthMethod         string `mapstructure:"token_auth_method"`     // client_secret_post / client_secret_basic / none
-	UsePKCE                 bool   `mapstructure:"use_pkce"`
-	ValidateIDToken         bool   `mapstructure:"validate_id_token"`
-	UsePKCEExplicit         bool   `mapstructure:"-" yaml:"-"`
-	ValidateIDTokenExplicit bool   `mapstructure:"-" yaml:"-"`
-	AllowedSigningAlgs      string `mapstructure:"allowed_signing_algs"`   // 默认 "RS256,ES256,PS256"
-	ClockSkewSeconds        int    `mapstructure:"clock_skew_seconds"`     // 默认 120
-	RequireEmailVerified    bool   `mapstructure:"require_email_verified"` // 默认 false
-
-	// 可选：用于从 userinfo JSON 中提取字段的 gjson 路径。
-	// 为空时，服务端会尝试一组常见字段名。
-	UserInfoEmailPath    string `mapstructure:"userinfo_email_path"`
-	UserInfoIDPath       string `mapstructure:"userinfo_id_path"`
-	UserInfoUsernamePath string `mapstructure:"userinfo_username_path"`
-}
-
 type DingTalkConnectConfig struct {
 	Enabled             bool   `mapstructure:"enabled"`
 	ClientID            string `mapstructure:"client_id"`
@@ -512,14 +484,6 @@ func shouldApplyLegacyWeChatEnv(configKey, envKey string) bool {
 	}
 	_, hasNewEnv := os.LookupEnv(envKey)
 	return !hasNewEnv
-}
-
-func hasExplicitConfigOrEnv(configKey, envKey string) bool {
-	if viper.InConfig(configKey) {
-		return true
-	}
-	_, ok := os.LookupEnv(envKey)
-	return ok
 }
 
 func applyLegacyWeChatConnectEnvCompatibility(cfg *WeChatConnectConfig) {
@@ -1901,25 +1865,7 @@ func load(allowMissingJWTSecret bool) (*Config, error) {
 	cfg.LinuxDo.UserInfoUsernamePath = strings.TrimSpace(cfg.LinuxDo.UserInfoUsernamePath)
 	applyLegacyWeChatConnectEnvCompatibility(&cfg.WeChat)
 	normalizeWeChatConnectConfig(&cfg.WeChat)
-	cfg.OIDC.ProviderName = strings.TrimSpace(cfg.OIDC.ProviderName)
-	cfg.OIDC.ClientID = strings.TrimSpace(cfg.OIDC.ClientID)
-	cfg.OIDC.ClientSecret = strings.TrimSpace(cfg.OIDC.ClientSecret)
-	cfg.OIDC.IssuerURL = strings.TrimSpace(cfg.OIDC.IssuerURL)
-	cfg.OIDC.DiscoveryURL = strings.TrimSpace(cfg.OIDC.DiscoveryURL)
-	cfg.OIDC.AuthorizeURL = strings.TrimSpace(cfg.OIDC.AuthorizeURL)
-	cfg.OIDC.TokenURL = strings.TrimSpace(cfg.OIDC.TokenURL)
-	cfg.OIDC.UserInfoURL = strings.TrimSpace(cfg.OIDC.UserInfoURL)
-	cfg.OIDC.JWKSURL = strings.TrimSpace(cfg.OIDC.JWKSURL)
-	cfg.OIDC.Scopes = strings.TrimSpace(cfg.OIDC.Scopes)
-	cfg.OIDC.RedirectURL = strings.TrimSpace(cfg.OIDC.RedirectURL)
-	cfg.OIDC.FrontendRedirectURL = strings.TrimSpace(cfg.OIDC.FrontendRedirectURL)
-	cfg.OIDC.TokenAuthMethod = strings.ToLower(strings.TrimSpace(cfg.OIDC.TokenAuthMethod))
-	cfg.OIDC.AllowedSigningAlgs = strings.TrimSpace(cfg.OIDC.AllowedSigningAlgs)
-	cfg.OIDC.UserInfoEmailPath = strings.TrimSpace(cfg.OIDC.UserInfoEmailPath)
-	cfg.OIDC.UserInfoIDPath = strings.TrimSpace(cfg.OIDC.UserInfoIDPath)
-	cfg.OIDC.UserInfoUsernamePath = strings.TrimSpace(cfg.OIDC.UserInfoUsernamePath)
-	cfg.OIDC.UsePKCEExplicit = hasExplicitConfigOrEnv("oidc_connect.use_pkce", "OIDC_CONNECT_USE_PKCE")
-	cfg.OIDC.ValidateIDTokenExplicit = hasExplicitConfigOrEnv("oidc_connect.validate_id_token", "OIDC_CONNECT_VALIDATE_ID_TOKEN")
+	loadSSOMigrationInputs(&cfg)
 	cfg.Dashboard.KeyPrefix = strings.TrimSpace(cfg.Dashboard.KeyPrefix)
 	cfg.CORS.AllowedOrigins = normalizeStringSlice(cfg.CORS.AllowedOrigins)
 	cfg.Security.ResponseHeaders.AdditionalAllowed = normalizeStringSlice(cfg.Security.ResponseHeaders.AdditionalAllowed)
@@ -2170,29 +2116,13 @@ func setDefaults() {
 	viper.SetDefault("wechat_connect.redirect_url", "")
 	viper.SetDefault("wechat_connect.frontend_redirect_url", defaultWeChatConnectFrontendRedirect)
 
-	// Generic OIDC OAuth 登录
-	viper.SetDefault("oidc_connect.enabled", false)
-	viper.SetDefault("oidc_connect.provider_name", "OIDC")
-	viper.SetDefault("oidc_connect.client_id", "")
-	viper.SetDefault("oidc_connect.client_secret", "")
-	viper.SetDefault("oidc_connect.issuer_url", "")
-	viper.SetDefault("oidc_connect.discovery_url", "")
-	viper.SetDefault("oidc_connect.authorize_url", "")
-	viper.SetDefault("oidc_connect.token_url", "")
-	viper.SetDefault("oidc_connect.userinfo_url", "")
-	viper.SetDefault("oidc_connect.jwks_url", "")
-	viper.SetDefault("oidc_connect.scopes", "openid email profile")
-	viper.SetDefault("oidc_connect.redirect_url", "")
-	viper.SetDefault("oidc_connect.frontend_redirect_url", "/auth/oidc/callback")
-	viper.SetDefault("oidc_connect.token_auth_method", "client_secret_post")
-	viper.SetDefault("oidc_connect.use_pkce", true)
-	viper.SetDefault("oidc_connect.validate_id_token", true)
-	viper.SetDefault("oidc_connect.allowed_signing_algs", "RS256,ES256,PS256")
-	viper.SetDefault("oidc_connect.clock_skew_seconds", 120)
-	viper.SetDefault("oidc_connect.require_email_verified", false)
-	viper.SetDefault("oidc_connect.userinfo_email_path", "")
-	viper.SetDefault("oidc_connect.userinfo_id_path", "")
-	viper.SetDefault("oidc_connect.userinfo_username_path", "")
+	// Independent Casdoor in-page authentication.
+	viper.SetDefault("sso.enabled", false)
+	viper.SetDefault("sso.only_enabled", false)
+	viper.SetDefault("sso.registration_enabled", false)
+	viper.SetDefault("sso.issuer_url", "")
+	viper.SetDefault("sso.organization", "kano")
+	viper.SetDefault("sso.application", "admin/sub2api")
 
 	// DingTalk Connect OAuth 登录
 	viper.SetDefault("dingtalk_connect.enabled", false)
@@ -3017,84 +2947,6 @@ func (c *Config) Validate() error {
 		}
 		warnIfInsecureURL("wechat_connect.frontend_redirect_url", weChat.FrontendRedirectURL)
 	}
-	if c.OIDC.Enabled {
-		if strings.TrimSpace(c.OIDC.ClientID) == "" {
-			return fmt.Errorf("oidc_connect.client_id is required when oidc_connect.enabled=true")
-		}
-		if strings.TrimSpace(c.OIDC.IssuerURL) == "" {
-			return fmt.Errorf("oidc_connect.issuer_url is required when oidc_connect.enabled=true")
-		}
-		if strings.TrimSpace(c.OIDC.RedirectURL) == "" {
-			return fmt.Errorf("oidc_connect.redirect_url is required when oidc_connect.enabled=true")
-		}
-		if strings.TrimSpace(c.OIDC.FrontendRedirectURL) == "" {
-			return fmt.Errorf("oidc_connect.frontend_redirect_url is required when oidc_connect.enabled=true")
-		}
-		if !scopeContainsOpenID(c.OIDC.Scopes) {
-			return fmt.Errorf("oidc_connect.scopes must contain openid")
-		}
-
-		method := strings.ToLower(strings.TrimSpace(c.OIDC.TokenAuthMethod))
-		switch method {
-		case "", "client_secret_post", "client_secret_basic", "none":
-		default:
-			return fmt.Errorf("oidc_connect.token_auth_method must be one of: client_secret_post/client_secret_basic/none")
-		}
-		if (method == "" || method == "client_secret_post" || method == "client_secret_basic") &&
-			strings.TrimSpace(c.OIDC.ClientSecret) == "" {
-			return fmt.Errorf("oidc_connect.client_secret is required when oidc_connect.enabled=true and token_auth_method is client_secret_post/client_secret_basic")
-		}
-		if c.OIDC.ClockSkewSeconds < 0 || c.OIDC.ClockSkewSeconds > 600 {
-			return fmt.Errorf("oidc_connect.clock_skew_seconds must be between 0 and 600")
-		}
-		if c.OIDC.ValidateIDToken && strings.TrimSpace(c.OIDC.AllowedSigningAlgs) == "" {
-			return fmt.Errorf("oidc_connect.allowed_signing_algs is required when oidc_connect.validate_id_token=true")
-		}
-
-		if err := ValidateAbsoluteHTTPURL(c.OIDC.IssuerURL); err != nil {
-			return fmt.Errorf("oidc_connect.issuer_url invalid: %w", err)
-		}
-		if v := strings.TrimSpace(c.OIDC.DiscoveryURL); v != "" {
-			if err := ValidateAbsoluteHTTPURL(v); err != nil {
-				return fmt.Errorf("oidc_connect.discovery_url invalid: %w", err)
-			}
-		}
-		if v := strings.TrimSpace(c.OIDC.AuthorizeURL); v != "" {
-			if err := ValidateAbsoluteHTTPURL(v); err != nil {
-				return fmt.Errorf("oidc_connect.authorize_url invalid: %w", err)
-			}
-		}
-		if v := strings.TrimSpace(c.OIDC.TokenURL); v != "" {
-			if err := ValidateAbsoluteHTTPURL(v); err != nil {
-				return fmt.Errorf("oidc_connect.token_url invalid: %w", err)
-			}
-		}
-		if v := strings.TrimSpace(c.OIDC.UserInfoURL); v != "" {
-			if err := ValidateAbsoluteHTTPURL(v); err != nil {
-				return fmt.Errorf("oidc_connect.userinfo_url invalid: %w", err)
-			}
-		}
-		if v := strings.TrimSpace(c.OIDC.JWKSURL); v != "" {
-			if err := ValidateAbsoluteHTTPURL(v); err != nil {
-				return fmt.Errorf("oidc_connect.jwks_url invalid: %w", err)
-			}
-		}
-		if err := ValidateAbsoluteHTTPURL(c.OIDC.RedirectURL); err != nil {
-			return fmt.Errorf("oidc_connect.redirect_url invalid: %w", err)
-		}
-		if err := ValidateFrontendRedirectURL(c.OIDC.FrontendRedirectURL); err != nil {
-			return fmt.Errorf("oidc_connect.frontend_redirect_url invalid: %w", err)
-		}
-
-		warnIfInsecureURL("oidc_connect.issuer_url", c.OIDC.IssuerURL)
-		warnIfInsecureURL("oidc_connect.discovery_url", c.OIDC.DiscoveryURL)
-		warnIfInsecureURL("oidc_connect.authorize_url", c.OIDC.AuthorizeURL)
-		warnIfInsecureURL("oidc_connect.token_url", c.OIDC.TokenURL)
-		warnIfInsecureURL("oidc_connect.userinfo_url", c.OIDC.UserInfoURL)
-		warnIfInsecureURL("oidc_connect.jwks_url", c.OIDC.JWKSURL)
-		warnIfInsecureURL("oidc_connect.redirect_url", c.OIDC.RedirectURL)
-		warnIfInsecureURL("oidc_connect.frontend_redirect_url", c.OIDC.FrontendRedirectURL)
-	}
 	if c.Billing.CircuitBreaker.Enabled {
 		if c.Billing.CircuitBreaker.FailureThreshold <= 0 {
 			return fmt.Errorf("billing.circuit_breaker.failure_threshold must be positive")
@@ -3904,15 +3756,6 @@ func ValidateFrontendRedirectURL(raw string) error {
 		return fmt.Errorf("must not include fragment")
 	}
 	return nil
-}
-
-func scopeContainsOpenID(scopes string) bool {
-	for _, scope := range strings.Fields(strings.ToLower(strings.TrimSpace(scopes))) {
-		if scope == "openid" {
-			return true
-		}
-	}
-	return false
 }
 
 // isHTTPScheme 检查是否为 HTTP 或 HTTPS 协议

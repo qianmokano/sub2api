@@ -104,6 +104,6 @@ func TestSSOAdminURL(t *testing.T) {
 		{"https://auth.example?redirect=bad", ""},
 		{"", ""},
 	} {
-		require.Equal(t, tc.expected, svc.ssoAdminURL(map[string]string{SettingKeyOIDCConnectIssuerURL: tc.issuer}))
+		require.Equal(t, tc.expected, svc.ssoAdminURL(map[string]string{SettingKeySSOIssuerURL: tc.issuer}))
 	}
 }

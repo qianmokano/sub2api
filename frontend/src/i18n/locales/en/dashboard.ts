@@ -975,7 +975,7 @@ export default {
         email: 'Email',
         linuxdo: 'LinuxDo',
         dingtalk: 'DingTalk',
-        oidc: '{providerName}',
+        oidc: 'kano Passport',
         wechat: 'WeChat',
       },
       notes: {

@@ -40,16 +40,16 @@ func TestSSOAuthGuardClosesAlternateEntrypoints(t *testing.T) {
 			require.Equal(t, http.StatusForbidden, w.Code)
 		})
 	}
-	for _, path := range []string{"/login", "/login/2fa", "/refresh", "/logout", "/me", "/revoke-all-sessions", "/sso/password-login", "/sso/mfa", "/sso/register/send-code", "/sso/register", "/oauth/oidc/start", "/oauth/oidc/callback", "/oauth/wechat/payment/start", "/oauth/wechat/payment/callback"} {
+	for _, path := range []string{"/login", "/login/2fa", "/refresh", "/logout", "/me", "/revoke-all-sessions", "/sso/password-login", "/sso/mfa", "/sso/register/send-code", "/sso/register", "/sso/captcha", "/oauth/wechat/payment/start", "/oauth/wechat/payment/callback"} {
 		require.True(t, ssoAllowsAuthPath("/api/v1/auth"+path))
 	}
 	for _, only := range []string{"false", "true"} {
 		r := gin.New()
 		svc := service.NewSettingService(&ssoGuardRepo{bmSettingRepo: bmSettingRepo{values: map[string]string{service.SettingKeySSOOnlyEnabled: only}}, err: errors.New("db offline")}, nil)
 		r.Use(SSOAuthGuard(svc))
-		r.POST("/api/v1/auth/login", func(c *gin.Context) { c.Status(http.StatusOK) })
+		r.POST("/api/v1/auth/sso/password-login", func(c *gin.Context) { c.Status(http.StatusOK) })
 		w := httptest.NewRecorder()
-		r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", nil))
+		r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/v1/auth/sso/password-login", nil))
 		require.Equal(t, http.StatusServiceUnavailable, w.Code)
 	}
 }
@@ -77,5 +77,30 @@ func TestSSOUserGuardPreservesAdminAndStepUp(t *testing.T) {
 			r.ServeHTTP(w, httptest.NewRequest(tc.method, "/api/v1/user"+tc.path, nil))
 			require.Equal(t, tc.status, w.Code)
 		})
+	}
+}
+
+func TestSSOGuardsPreserveAdminRecoveryDuringSettingsFailure(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	svc := service.NewSettingService(&ssoGuardRepo{err: errors.New("db offline")}, nil)
+	for _, path := range []string{"/login", "/login/2fa", "/refresh", "/logout"} {
+		r := gin.New()
+		r.Use(SSOAuthGuard(svc))
+		r.POST("/api/v1/auth"+path, func(c *gin.Context) { c.Status(http.StatusOK) })
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/v1/auth"+path, nil))
+		require.Equal(t, http.StatusOK, w.Code)
+	}
+	for _, tc := range []struct {
+		role   string
+		status int
+	}{{"admin", 200}, {"user", 503}} {
+		r := gin.New()
+		r.Use(func(c *gin.Context) { c.Set(string(ContextKeyUserRole), tc.role); c.Next() })
+		r.Use(SSOUserGuard(svc))
+		r.PUT("/api/v1/user/password", func(c *gin.Context) { c.Status(http.StatusOK) })
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest(http.MethodPut, "/api/v1/user/password", nil))
+		require.Equal(t, tc.status, w.Code)
 	}
 }

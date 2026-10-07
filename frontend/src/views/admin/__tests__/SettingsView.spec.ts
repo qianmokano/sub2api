@@ -430,28 +430,12 @@ const baseSettingsResponse = {
   wechat_connect_redirect_url:
     "https://admin.example.com/api/v1/auth/oauth/wechat/callback",
   wechat_connect_frontend_redirect_url: "/auth/wechat/callback",
-  oidc_connect_enabled: false,
-  oidc_connect_provider_name: "OIDC",
-  oidc_connect_client_id: "",
-  oidc_connect_client_secret_configured: false,
-  oidc_connect_issuer_url: "",
-  oidc_connect_discovery_url: "",
-  oidc_connect_authorize_url: "",
-  oidc_connect_token_url: "",
-  oidc_connect_userinfo_url: "",
-  oidc_connect_jwks_url: "",
-  oidc_connect_scopes: "openid email profile",
-  oidc_connect_redirect_url: "",
-  oidc_connect_frontend_redirect_url: "/auth/oidc/callback",
-  oidc_connect_token_auth_method: "client_secret_post",
-  oidc_connect_use_pkce: true,
-  oidc_connect_validate_id_token: true,
-  oidc_connect_allowed_signing_algs: "RS256,ES256,PS256",
-  oidc_connect_clock_skew_seconds: 120,
-  oidc_connect_require_email_verified: false,
-  oidc_connect_userinfo_email_path: "",
-  oidc_connect_userinfo_id_path: "",
-  oidc_connect_userinfo_username_path: "",
+  sso_enabled: false,
+  sso_only_enabled: false,
+  sso_registration_enabled: false,
+  sso_issuer_url: "",
+  sso_organization: "kano",
+  sso_application: "admin/sub2api",
   enable_model_fallback: false,
   fallback_model_anthropic: "",
   fallback_model_openai: "",
@@ -1875,28 +1859,41 @@ describe("admin SettingsView wechat connect controls", () => {
     expect(wrapper.text()).toContain("首次绑定时授权");
   });
 
-  it("preserves optional OIDC compatibility flags instead of forcing them on save", async () => {
+  it("saves independent Passport settings and omits legacy OIDC fields", async () => {
     getSettings.mockResolvedValueOnce({
       ...baseSettingsResponse,
-      oidc_connect_enabled: true,
-      oidc_connect_use_pkce: false,
-      oidc_connect_validate_id_token: false,
+      sso_enabled: true,
+      sso_only_enabled: false,
+      sso_registration_enabled: true,
+      sso_issuer_url: "https://auth.example",
+      sso_organization: "kano",
+      sso_application: "admin/sub2api",
+      oidc_connect_issuer_url: "https://legacy.example",
     });
 
     const wrapper = mountView();
 
     await flushPromises();
     await openSecurityTab(wrapper);
+    expect(wrapper.findAll('[data-testid="passport-auth-settings"]')).toHaveLength(1);
+    const issuer = wrapper.get('[data-testid="passport-auth-settings"] input[type="url"]');
+    expect((issuer.element as HTMLInputElement).value).toBe("https://auth.example");
+    await issuer.setValue("https://new-auth.example");
     await wrapper.find("form").trigger("submit.prevent");
     await flushPromises();
 
     expect(updateSettings).toHaveBeenCalledTimes(1);
     expect(updateSettings).toHaveBeenCalledWith(
       expect.objectContaining({
-        oidc_connect_use_pkce: false,
-        oidc_connect_validate_id_token: false,
+        sso_enabled: true,
+        sso_only_enabled: false,
+        sso_registration_enabled: true,
+        sso_issuer_url: "https://new-auth.example",
+        sso_organization: "kano",
+        sso_application: "admin/sub2api",
       }),
     );
+    expect(Object.keys(updateSettings.mock.calls[0]![0]).some(key => key.startsWith("oidc_connect_"))).toBe(false);
   });
 });
 

@@ -69,7 +69,7 @@ vi.mock('@/stores', () => ({
   useAppStore: () => appStoreMock
 }))
 
-vi.mock('@/api/sso', () => ({ sendCode: sendSSOCodeMock, isSSOMFARequired: () => false }))
+vi.mock('@/api/sso', () => ({ sendCode: sendSSOCodeMock, isSSOMFARequired: () => false, prepareCaptcha: vi.fn(async () => ({ required: false })) }))
 
 vi.mock('@/api/auth', async () => {
   const actual = await vi.importActual<typeof import('@/api/auth')>('@/api/auth')

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/casdoor"
@@ -10,6 +11,7 @@ import (
 )
 
 const (
+	SettingKeySSOIssuerURL           = "sso_issuer_url"
 	SettingKeySSOEnabled             = "sso_enabled"
 	SettingKeySSOOnlyEnabled         = "sso_only_enabled"
 	SettingKeySSORegistrationEnabled = "sso_registration_enabled"
@@ -21,65 +23,109 @@ type SSOSettings struct {
 	Enabled             bool
 	OnlyEnabled         bool
 	RegistrationEnabled bool
-	OIDCEnabled         bool
 	Config              casdoor.Config
 }
 
 var ErrSSOOnly = infraerrors.Forbidden("SSO_ONLY", "Please use kano Passport to sign in or manage your account")
 
+type ssoSettingsMigrator interface {
+	MigrateSSOSettings(context.Context, map[string]string) error
+}
+
+func (s *SettingService) ssoSettingDefaults() map[string]string {
+	values := map[string]string{
+		SettingKeySSOEnabled: "false", SettingKeySSOOnlyEnabled: "false",
+		SettingKeySSORegistrationEnabled: "false", SettingKeySSOIssuerURL: "",
+		SettingKeySSOOrganization: "kano", SettingKeySSOApplication: "admin/sub2api",
+	}
+	if s != nil && s.cfg != nil {
+		cfg := s.cfg.SSO
+		values[SettingKeySSOEnabled] = strconv.FormatBool(cfg.Enabled)
+		values[SettingKeySSOOnlyEnabled] = strconv.FormatBool(cfg.OnlyEnabled)
+		values[SettingKeySSORegistrationEnabled] = strconv.FormatBool(cfg.RegistrationEnabled)
+		values[SettingKeySSOIssuerURL] = cfg.IssuerURL
+		if cfg.Organization != "" || s.cfg.SSOConfigured["organization"] {
+			values[SettingKeySSOOrganization] = cfg.Organization
+		}
+		if cfg.Application != "" || s.cfg.SSOConfigured["application"] {
+			values[SettingKeySSOApplication] = cfg.Application
+		}
+	}
+	return values
+}
+
+func (s *SettingService) ssoSettingValue(settings map[string]string, key string) string {
+	if value, exists := settings[key]; exists {
+		return value
+	}
+	return s.ssoSettingDefaults()[key]
+}
+
+// MigrateSSOSettings consumes legacy runtime input only during the first migration.
+func (s *SettingService) MigrateSSOSettings(ctx context.Context) error {
+	migrator, ok := s.settingRepo.(ssoSettingsMigrator)
+	if !ok {
+		return ErrServiceUnavailable
+	}
+	values := s.ssoSettingDefaults()
+	if s.cfg != nil && !s.cfg.SSOConfigured["issuer_url"] && s.cfg.LegacySSOIssuer != nil {
+		values[SettingKeySSOIssuerURL] = *s.cfg.LegacySSOIssuer
+	}
+	return migrator.MigrateSSOSettings(ctx, values)
+}
+
 // GetSSOSettings reads the current policy without silently disabling it on storage errors.
 func (s *SettingService) GetSSOSettings(ctx context.Context) (*SSOSettings, error) {
-	if s == nil || s.settingRepo == nil {
+	if s == nil || s.settingRepo == nil || s.ssoMigrationErr != nil {
 		return nil, ErrServiceUnavailable
 	}
 	settings, err := s.settingRepo.GetMultiple(ctx, []string{
 		SettingKeySSOEnabled, SettingKeySSOOnlyEnabled, SettingKeySSORegistrationEnabled,
-		SettingKeySSOOrganization, SettingKeySSOApplication, SettingKeyOIDCConnectIssuerURL, SettingKeyOIDCConnectEnabled,
+		SettingKeySSOOrganization, SettingKeySSOApplication, SettingKeySSOIssuerURL,
 	})
 	if err != nil {
 		return nil, ErrServiceUnavailable
 	}
-	issuer := settings[SettingKeyOIDCConnectIssuerURL]
-	oidcEnabled := settings[SettingKeyOIDCConnectEnabled] == "true"
-	if s.cfg != nil {
-		if strings.TrimSpace(issuer) == "" {
-			issuer = s.cfg.OIDC.IssuerURL
+	flags := make(map[string]bool, 3)
+	for _, key := range []string{SettingKeySSOEnabled, SettingKeySSOOnlyEnabled, SettingKeySSORegistrationEnabled} {
+		value := s.ssoSettingValue(settings, key)
+		if value != "true" && value != "false" {
+			return nil, ErrServiceUnavailable
 		}
-		if _, exists := settings[SettingKeyOIDCConnectEnabled]; !exists {
-			oidcEnabled = s.cfg.OIDC.Enabled
-		}
+		flags[key] = value == "true"
 	}
 	return &SSOSettings{
-		Enabled: settings[SettingKeySSOEnabled] == "true", OnlyEnabled: settings[SettingKeySSOOnlyEnabled] == "true",
-		RegistrationEnabled: settings[SettingKeySSORegistrationEnabled] == "true", OIDCEnabled: oidcEnabled,
+		Enabled: flags[SettingKeySSOEnabled], OnlyEnabled: flags[SettingKeySSOOnlyEnabled],
+		RegistrationEnabled: flags[SettingKeySSORegistrationEnabled],
 		Config: casdoor.Config{
-			Issuer:       strings.TrimRight(strings.TrimSpace(issuer), "/"),
-			Organization: firstNonEmpty(settings[SettingKeySSOOrganization], "kano"),
-			Application:  firstNonEmpty(settings[SettingKeySSOApplication], "admin/sub2api"),
+			Issuer:       strings.TrimRight(strings.TrimSpace(s.ssoSettingValue(settings, SettingKeySSOIssuerURL)), "/"),
+			Organization: s.ssoSettingValue(settings, SettingKeySSOOrganization),
+			Application:  s.ssoSettingValue(settings, SettingKeySSOApplication),
 		},
 	}, nil
 }
 
 func validateSSOSettings(settings *SystemSettings) error {
-	settings.SSOOrganization = firstNonEmpty(settings.SSOOrganization, "kano")
-	settings.SSOApplication = firstNonEmpty(settings.SSOApplication, "admin/sub2api")
+	settings.SSOIssuerURL = strings.TrimRight(strings.TrimSpace(settings.SSOIssuerURL), "/")
+	settings.SSOOrganization = strings.TrimSpace(settings.SSOOrganization)
+	settings.SSOApplication = strings.TrimSpace(settings.SSOApplication)
 	if !settings.SSOEnabled {
 		if settings.SSOOnlyEnabled || settings.SSORegistrationEnabled {
 			return infraerrors.BadRequest("SSO_CONFIG_INVALID", "Enable in-page SSO before enabling its login policy or registration")
 		}
 		return nil
 	}
-	return validateSSOConfig(settings.OIDCConnectEnabled, casdoor.Config{
-		Issuer: settings.OIDCConnectIssuerURL, Organization: settings.SSOOrganization, Application: settings.SSOApplication,
+	return validateSSOConfig(casdoor.Config{
+		Issuer: settings.SSOIssuerURL, Organization: settings.SSOOrganization, Application: settings.SSOApplication,
 	})
 }
 
-func validateSSOConfig(oidcEnabled bool, cfg casdoor.Config) error {
+func validateSSOConfig(cfg casdoor.Config) error {
 	u, err := url.Parse(cfg.Issuer)
 	parts := strings.Split(cfg.Application, "/")
-	if !oidcEnabled || err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || strings.Trim(u.Path, "/") != "" ||
+	if err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || strings.Trim(u.Path, "/") != "" ||
 		cfg.Organization == "" || len(parts) != 2 || strings.TrimSpace(parts[0]) == "" || strings.TrimSpace(parts[1]) == "" {
-		return infraerrors.BadRequest("SSO_CONFIG_INVALID", "Configure an enabled HTTPS OIDC issuer, a user organization and an application ID (owner/name)")
+		return infraerrors.BadRequest("SSO_CONFIG_INVALID", "Configure an HTTPS Passport issuer, a user organization and an application ID (owner/name)")
 	}
 	return nil
 }
@@ -125,16 +171,13 @@ func (s *SettingService) RequireLocalUserIdentity(ctx context.Context, currentRo
 }
 
 func (s *SettingService) ssoManagementURLs(settings map[string]string) (string, string) {
-	issuer := settings[SettingKeyOIDCConnectIssuerURL]
-	if issuer == "" && s.cfg != nil {
-		issuer = s.cfg.OIDC.IssuerURL
-	}
+	issuer := s.ssoSettingValue(settings, SettingKeySSOIssuerURL)
 	u, err := url.Parse(issuer)
 	if err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || strings.Trim(u.Path, "/") != "" {
 		return "", ""
 	}
-	organization := firstNonEmpty(settings[SettingKeySSOOrganization], "kano")
-	parts := strings.Split(firstNonEmpty(settings[SettingKeySSOApplication], "admin/sub2api"), "/")
+	organization := s.ssoSettingValue(settings, SettingKeySSOOrganization)
+	parts := strings.Split(s.ssoSettingValue(settings, SettingKeySSOApplication), "/")
 	if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" || strings.TrimSpace(parts[1]) == "" {
 		return "", ""
 	}

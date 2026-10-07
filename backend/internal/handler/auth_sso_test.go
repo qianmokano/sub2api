@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -94,34 +93,6 @@ func TestSSOFinishRequiresLocalMFAEvenIfGlobalToggleOff(t *testing.T) {
 	require.NotContains(t, w.Body.String(), "access_token")
 }
 
-func TestSSOOIDCFallbackUsesBoundSubjectAndLocalMFA(t *testing.T) {
-	cache := &oauthPendingFlowTotpCacheStub{}
-	h, client := newOAuthPendingFlowTestHandlerWithDependencies(t, oauthPendingFlowTestHandlerOptions{
-		settingValues: map[string]string{service.SettingKeySSOEnabled: "true", service.SettingKeySSOOnlyEnabled: "true", service.SettingKeyOIDCConnectEnabled: "true", service.SettingKeyOIDCConnectIssuerURL: "https://auth.example"}, totpCache: cache,
-	})
-	user, err := client.User.Create().SetEmail("bound@example.com").SetPasswordHash("hash").SetRole(service.RoleUser).SetStatus(service.StatusActive).SetTotpEnabled(true).Save(context.Background())
-	require.NoError(t, err)
-	_, err = client.AuthIdentity.Create().SetUserID(user.ID).SetProviderType("oidc").SetProviderKey("https://auth.example").SetProviderSubject("bound-sub").Save(context.Background())
-	require.NoError(t, err)
-	c, w := ssoRequest("/api/v1/auth/oauth/oidc/callback", `{}`)
-	require.True(t, h.trySSOOIDCCallback(c, "/auth/oidc/callback", "/keys", oauthIntentLogin, "https://auth.example", &casdoor.Identity{Subject: "bound-sub", Email: "changed@example.com", DisplayName: "Changed"}))
-	c.Writer.WriteHeaderNow()
-	require.Equal(t, http.StatusFound, w.Code)
-	location, err := url.Parse(w.Header().Get("Location"))
-	require.NoError(t, err)
-	require.Equal(t, "/login", location.Path)
-	fragment, err := url.ParseQuery(location.Fragment)
-	require.NoError(t, err)
-	require.Empty(t, fragment.Get("access_token"))
-	require.Equal(t, "/keys", fragment.Get("redirect"))
-	session := cache.loginSessions[fragment.Get("sso_totp_token")]
-	require.Equal(t, user.ID, session.UserID)
-	require.Equal(t, "sso", session.AuthenticationSource)
-	c, w = ssoRequest("/api/v1/auth/oauth/oidc/callback", `{}`)
-	require.True(t, h.trySSOOIDCCallback(c, "/auth/oidc/callback", "/keys", oauthIntentBindCurrentUser, "https://auth.example", &casdoor.Identity{Subject: "bound-sub", Email: user.Email, EmailVerified: true}))
-	require.Contains(t, w.Header().Get("Location"), "SSO_ONLY")
-}
-
 type handlerSSOStore struct{ session *casdoor.Session }
 
 func (s *handlerSSOStore) Put(_ context.Context, _ string, v *casdoor.Session) error {
@@ -146,7 +117,7 @@ func TestSSOPasswordHandlerKeepsProviderCookiesOnServer(t *testing.T) {
 	http.DefaultTransport = srv.Client().Transport
 	t.Cleanup(func() { http.DefaultTransport = previous })
 	h, _ := newOAuthPendingFlowTestHandlerWithDependencies(t, oauthPendingFlowTestHandlerOptions{settingValues: map[string]string{
-		service.SettingKeySSOEnabled: "true", service.SettingKeyOIDCConnectEnabled: "true", service.SettingKeyOIDCConnectIssuerURL: srv.URL,
+		service.SettingKeySSOEnabled: "true", service.SettingKeySSOIssuerURL: srv.URL,
 	}})
 	store := &handlerSSOStore{}
 	h.SetSSOService(service.NewSSOService(h.settingSvc, h.authService, store))

@@ -25,6 +25,7 @@ type UpdateSettingsRequest struct {
 	SSOEnabled             *bool   `json:"sso_enabled"`
 	SSOOnlyEnabled         *bool   `json:"sso_only_enabled"`
 	SSORegistrationEnabled *bool   `json:"sso_registration_enabled"`
+	SSOIssuerURL           *string `json:"sso_issuer_url"`
 	SSOOrganization        *string `json:"sso_organization"`
 	SSOApplication         *string `json:"sso_application"`
 	// 注册设置
@@ -122,29 +123,7 @@ type UpdateSettingsRequest struct {
 	WeChatConnectRedirectURL         string `json:"wechat_connect_redirect_url"`
 	WeChatConnectFrontendRedirectURL string `json:"wechat_connect_frontend_redirect_url"`
 
-	// Generic OIDC OAuth 登录
-	OIDCConnectEnabled              bool   `json:"oidc_connect_enabled"`
-	OIDCConnectProviderName         string `json:"oidc_connect_provider_name"`
-	OIDCConnectClientID             string `json:"oidc_connect_client_id"`
-	OIDCConnectClientSecret         string `json:"oidc_connect_client_secret"`
-	OIDCConnectIssuerURL            string `json:"oidc_connect_issuer_url"`
-	OIDCConnectDiscoveryURL         string `json:"oidc_connect_discovery_url"`
-	OIDCConnectAuthorizeURL         string `json:"oidc_connect_authorize_url"`
-	OIDCConnectTokenURL             string `json:"oidc_connect_token_url"`
-	OIDCConnectUserInfoURL          string `json:"oidc_connect_userinfo_url"`
-	OIDCConnectJWKSURL              string `json:"oidc_connect_jwks_url"`
-	OIDCConnectScopes               string `json:"oidc_connect_scopes"`
-	OIDCConnectRedirectURL          string `json:"oidc_connect_redirect_url"`
-	OIDCConnectFrontendRedirectURL  string `json:"oidc_connect_frontend_redirect_url"`
-	OIDCConnectTokenAuthMethod      string `json:"oidc_connect_token_auth_method"`
-	OIDCConnectUsePKCE              *bool  `json:"oidc_connect_use_pkce"`
-	OIDCConnectValidateIDToken      *bool  `json:"oidc_connect_validate_id_token"`
-	OIDCConnectAllowedSigningAlgs   string `json:"oidc_connect_allowed_signing_algs"`
-	OIDCConnectClockSkewSeconds     int    `json:"oidc_connect_clock_skew_seconds"`
-	OIDCConnectRequireEmailVerified bool   `json:"oidc_connect_require_email_verified"`
-	OIDCConnectUserInfoEmailPath    string `json:"oidc_connect_userinfo_email_path"`
-	OIDCConnectUserInfoIDPath       string `json:"oidc_connect_userinfo_id_path"`
-	OIDCConnectUserInfoUsernamePath string `json:"oidc_connect_userinfo_username_path"`
+	// In-page Passport authentication
 
 	GitHubOAuthEnabled             bool   `json:"github_oauth_enabled"`
 	GitHubOAuthClientID            string `json:"github_oauth_client_id"`
@@ -516,6 +495,10 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		return
 	}
 	ssoEnabled, ssoOnlyEnabled, ssoRegistrationEnabled := previousSettings.SSOEnabled, previousSettings.SSOOnlyEnabled, previousSettings.SSORegistrationEnabled
+	ssoIssuer := previousSettings.SSOIssuerURL
+	if req.SSOIssuerURL != nil {
+		ssoIssuer = strings.TrimSpace(*req.SSOIssuerURL)
+	}
 	ssoOrganization, ssoApplication := previousSettings.SSOOrganization, previousSettings.SSOApplication
 	if req.SSOEnabled != nil {
 		ssoEnabled = *req.SSOEnabled
@@ -1106,146 +1089,6 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		}
 	}
 
-	// Generic OIDC 参数验证
-	oidcUsePKCE, oidcValidateIDToken, err := h.settingService.OIDCSecurityWriteDefaults(c.Request.Context())
-	if err != nil {
-		response.ErrorFrom(c, err)
-		return
-	}
-	if req.OIDCConnectEnabled {
-		req.OIDCConnectProviderName = strings.TrimSpace(req.OIDCConnectProviderName)
-		req.OIDCConnectClientID = strings.TrimSpace(req.OIDCConnectClientID)
-		req.OIDCConnectClientSecret = strings.TrimSpace(req.OIDCConnectClientSecret)
-		req.OIDCConnectIssuerURL = strings.TrimSpace(req.OIDCConnectIssuerURL)
-		req.OIDCConnectDiscoveryURL = strings.TrimSpace(req.OIDCConnectDiscoveryURL)
-		req.OIDCConnectAuthorizeURL = strings.TrimSpace(req.OIDCConnectAuthorizeURL)
-		req.OIDCConnectTokenURL = strings.TrimSpace(req.OIDCConnectTokenURL)
-		req.OIDCConnectUserInfoURL = strings.TrimSpace(req.OIDCConnectUserInfoURL)
-		req.OIDCConnectJWKSURL = strings.TrimSpace(req.OIDCConnectJWKSURL)
-		req.OIDCConnectScopes = strings.TrimSpace(req.OIDCConnectScopes)
-		req.OIDCConnectRedirectURL = strings.TrimSpace(req.OIDCConnectRedirectURL)
-		req.OIDCConnectFrontendRedirectURL = strings.TrimSpace(req.OIDCConnectFrontendRedirectURL)
-		req.OIDCConnectTokenAuthMethod = strings.ToLower(strings.TrimSpace(req.OIDCConnectTokenAuthMethod))
-		req.OIDCConnectAllowedSigningAlgs = strings.TrimSpace(req.OIDCConnectAllowedSigningAlgs)
-		req.OIDCConnectUserInfoEmailPath = strings.TrimSpace(req.OIDCConnectUserInfoEmailPath)
-		req.OIDCConnectUserInfoIDPath = strings.TrimSpace(req.OIDCConnectUserInfoIDPath)
-		req.OIDCConnectUserInfoUsernamePath = strings.TrimSpace(req.OIDCConnectUserInfoUsernamePath)
-		req.OIDCConnectProviderName = strings.TrimSpace(firstNonEmpty(req.OIDCConnectProviderName, previousSettings.OIDCConnectProviderName, "OIDC"))
-		req.OIDCConnectClientID = strings.TrimSpace(firstNonEmpty(req.OIDCConnectClientID, previousSettings.OIDCConnectClientID))
-		req.OIDCConnectIssuerURL = strings.TrimSpace(firstNonEmpty(req.OIDCConnectIssuerURL, previousSettings.OIDCConnectIssuerURL))
-		req.OIDCConnectDiscoveryURL = strings.TrimSpace(firstNonEmpty(req.OIDCConnectDiscoveryURL, previousSettings.OIDCConnectDiscoveryURL))
-		req.OIDCConnectAuthorizeURL = strings.TrimSpace(firstNonEmpty(req.OIDCConnectAuthorizeURL, previousSettings.OIDCConnectAuthorizeURL))
-		req.OIDCConnectTokenURL = strings.TrimSpace(firstNonEmpty(req.OIDCConnectTokenURL, previousSettings.OIDCConnectTokenURL))
-		req.OIDCConnectUserInfoURL = strings.TrimSpace(firstNonEmpty(req.OIDCConnectUserInfoURL, previousSettings.OIDCConnectUserInfoURL))
-		req.OIDCConnectJWKSURL = strings.TrimSpace(firstNonEmpty(req.OIDCConnectJWKSURL, previousSettings.OIDCConnectJWKSURL))
-		req.OIDCConnectScopes = strings.TrimSpace(firstNonEmpty(req.OIDCConnectScopes, previousSettings.OIDCConnectScopes, "openid email profile"))
-		req.OIDCConnectRedirectURL = strings.TrimSpace(firstNonEmpty(req.OIDCConnectRedirectURL, previousSettings.OIDCConnectRedirectURL))
-		req.OIDCConnectFrontendRedirectURL = strings.TrimSpace(firstNonEmpty(req.OIDCConnectFrontendRedirectURL, previousSettings.OIDCConnectFrontendRedirectURL, "/auth/oidc/callback"))
-		req.OIDCConnectTokenAuthMethod = strings.ToLower(strings.TrimSpace(firstNonEmpty(req.OIDCConnectTokenAuthMethod, previousSettings.OIDCConnectTokenAuthMethod, "client_secret_post")))
-		req.OIDCConnectAllowedSigningAlgs = strings.TrimSpace(firstNonEmpty(req.OIDCConnectAllowedSigningAlgs, previousSettings.OIDCConnectAllowedSigningAlgs, "RS256,ES256,PS256"))
-		req.OIDCConnectUserInfoEmailPath = strings.TrimSpace(firstNonEmpty(req.OIDCConnectUserInfoEmailPath, previousSettings.OIDCConnectUserInfoEmailPath))
-		req.OIDCConnectUserInfoIDPath = strings.TrimSpace(firstNonEmpty(req.OIDCConnectUserInfoIDPath, previousSettings.OIDCConnectUserInfoIDPath))
-		req.OIDCConnectUserInfoUsernamePath = strings.TrimSpace(firstNonEmpty(req.OIDCConnectUserInfoUsernamePath, previousSettings.OIDCConnectUserInfoUsernamePath))
-		if req.OIDCConnectUsePKCE != nil {
-			oidcUsePKCE = *req.OIDCConnectUsePKCE
-		}
-		if req.OIDCConnectValidateIDToken != nil {
-			oidcValidateIDToken = *req.OIDCConnectValidateIDToken
-		}
-		if req.OIDCConnectClockSkewSeconds == 0 {
-			req.OIDCConnectClockSkewSeconds = previousSettings.OIDCConnectClockSkewSeconds
-			if req.OIDCConnectClockSkewSeconds == 0 {
-				req.OIDCConnectClockSkewSeconds = 120
-			}
-		}
-
-		if req.OIDCConnectClientID == "" {
-			response.BadRequest(c, "OIDC Client ID is required when enabled")
-			return
-		}
-		if req.OIDCConnectIssuerURL == "" {
-			response.BadRequest(c, "OIDC Issuer URL is required when enabled")
-			return
-		}
-		if err := config.ValidateAbsoluteHTTPURL(req.OIDCConnectIssuerURL); err != nil {
-			response.BadRequest(c, "OIDC Issuer URL must be an absolute http(s) URL")
-			return
-		}
-		if req.OIDCConnectDiscoveryURL != "" {
-			if err := config.ValidateAbsoluteHTTPURL(req.OIDCConnectDiscoveryURL); err != nil {
-				response.BadRequest(c, "OIDC Discovery URL must be an absolute http(s) URL")
-				return
-			}
-		}
-		if req.OIDCConnectAuthorizeURL != "" {
-			if err := config.ValidateAbsoluteHTTPURL(req.OIDCConnectAuthorizeURL); err != nil {
-				response.BadRequest(c, "OIDC Authorize URL must be an absolute http(s) URL")
-				return
-			}
-		}
-		if req.OIDCConnectTokenURL != "" {
-			if err := config.ValidateAbsoluteHTTPURL(req.OIDCConnectTokenURL); err != nil {
-				response.BadRequest(c, "OIDC Token URL must be an absolute http(s) URL")
-				return
-			}
-		}
-		if req.OIDCConnectUserInfoURL != "" {
-			if err := config.ValidateAbsoluteHTTPURL(req.OIDCConnectUserInfoURL); err != nil {
-				response.BadRequest(c, "OIDC UserInfo URL must be an absolute http(s) URL")
-				return
-			}
-		}
-		if req.OIDCConnectRedirectURL == "" {
-			response.BadRequest(c, "OIDC Redirect URL is required when enabled")
-			return
-		}
-		if err := config.ValidateAbsoluteHTTPURL(req.OIDCConnectRedirectURL); err != nil {
-			response.BadRequest(c, "OIDC Redirect URL must be an absolute http(s) URL")
-			return
-		}
-		if req.OIDCConnectFrontendRedirectURL == "" {
-			response.BadRequest(c, "OIDC Frontend Redirect URL is required when enabled")
-			return
-		}
-		if err := config.ValidateFrontendRedirectURL(req.OIDCConnectFrontendRedirectURL); err != nil {
-			response.BadRequest(c, "OIDC Frontend Redirect URL is invalid")
-			return
-		}
-		if !scopesContainOpenID(req.OIDCConnectScopes) {
-			response.BadRequest(c, "OIDC scopes must contain openid")
-			return
-		}
-		switch req.OIDCConnectTokenAuthMethod {
-		case "", "client_secret_post", "client_secret_basic", "none":
-		default:
-			response.BadRequest(c, "OIDC Token Auth Method must be one of client_secret_post/client_secret_basic/none")
-			return
-		}
-		if req.OIDCConnectClockSkewSeconds < 0 || req.OIDCConnectClockSkewSeconds > 600 {
-			response.BadRequest(c, "OIDC clock skew seconds must be between 0 and 600")
-			return
-		}
-		if oidcValidateIDToken && req.OIDCConnectAllowedSigningAlgs == "" {
-			response.BadRequest(c, "OIDC Allowed Signing Algs is required when validate_id_token=true")
-			return
-		}
-		if req.OIDCConnectJWKSURL != "" {
-			if err := config.ValidateAbsoluteHTTPURL(req.OIDCConnectJWKSURL); err != nil {
-				response.BadRequest(c, "OIDC JWKS URL must be an absolute http(s) URL")
-				return
-			}
-		}
-		if req.OIDCConnectTokenAuthMethod == "" || req.OIDCConnectTokenAuthMethod == "client_secret_post" || req.OIDCConnectTokenAuthMethod == "client_secret_basic" {
-			if req.OIDCConnectClientSecret == "" {
-				if previousSettings.OIDCConnectClientSecret == "" {
-					response.BadRequest(c, "OIDC Client Secret is required when enabled")
-					return
-				}
-				req.OIDCConnectClientSecret = previousSettings.OIDCConnectClientSecret
-			}
-		}
-	}
-
 	// “购买订阅”页面配置验证
 	purchaseEnabled := previousSettings.PurchaseSubscriptionEnabled
 	if req.PurchaseSubscriptionEnabled != nil {
@@ -1541,6 +1384,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 
 	settings := &service.SystemSettings{
 		SSOEnabled: ssoEnabled, SSOOnlyEnabled: ssoOnlyEnabled, SSORegistrationEnabled: ssoRegistrationEnabled,
+		SSOIssuerURL:    ssoIssuer,
 		SSOOrganization: ssoOrganization, SSOApplication: ssoApplication,
 		// 系统全局 platform quota 默认值（整体替换语义）
 		DefaultPlatformQuotas:       req.DefaultPlatformQuotas,
@@ -1628,28 +1472,6 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		WeChatConnectScopes:                    req.WeChatConnectScopes,
 		WeChatConnectRedirectURL:               req.WeChatConnectRedirectURL,
 		WeChatConnectFrontendRedirectURL:       req.WeChatConnectFrontendRedirectURL,
-		OIDCConnectEnabled:                     req.OIDCConnectEnabled,
-		OIDCConnectProviderName:                req.OIDCConnectProviderName,
-		OIDCConnectClientID:                    req.OIDCConnectClientID,
-		OIDCConnectClientSecret:                req.OIDCConnectClientSecret,
-		OIDCConnectIssuerURL:                   req.OIDCConnectIssuerURL,
-		OIDCConnectDiscoveryURL:                req.OIDCConnectDiscoveryURL,
-		OIDCConnectAuthorizeURL:                req.OIDCConnectAuthorizeURL,
-		OIDCConnectTokenURL:                    req.OIDCConnectTokenURL,
-		OIDCConnectUserInfoURL:                 req.OIDCConnectUserInfoURL,
-		OIDCConnectJWKSURL:                     req.OIDCConnectJWKSURL,
-		OIDCConnectScopes:                      req.OIDCConnectScopes,
-		OIDCConnectRedirectURL:                 req.OIDCConnectRedirectURL,
-		OIDCConnectFrontendRedirectURL:         req.OIDCConnectFrontendRedirectURL,
-		OIDCConnectTokenAuthMethod:             req.OIDCConnectTokenAuthMethod,
-		OIDCConnectUsePKCE:                     oidcUsePKCE,
-		OIDCConnectValidateIDToken:             oidcValidateIDToken,
-		OIDCConnectAllowedSigningAlgs:          req.OIDCConnectAllowedSigningAlgs,
-		OIDCConnectClockSkewSeconds:            req.OIDCConnectClockSkewSeconds,
-		OIDCConnectRequireEmailVerified:        req.OIDCConnectRequireEmailVerified,
-		OIDCConnectUserInfoEmailPath:           req.OIDCConnectUserInfoEmailPath,
-		OIDCConnectUserInfoIDPath:              req.OIDCConnectUserInfoIDPath,
-		OIDCConnectUserInfoUsernamePath:        req.OIDCConnectUserInfoUsernamePath,
 		GitHubOAuthEnabled:                     req.GitHubOAuthEnabled,
 		GitHubOAuthClientID:                    req.GitHubOAuthClientID,
 		GitHubOAuthClientSecret:                req.GitHubOAuthClientSecret,
@@ -2121,13 +1943,6 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		},
 		ForceEmailOnThirdPartySignup: boolValueOrDefault(req.ForceEmailOnThirdPartySignup, previousAuthSourceDefaults.ForceEmailOnThirdPartySignup),
 	}
-	// Cross-field SSO validation must use retained OIDC values for partial saves.
-	if _, absent := omitted[service.SettingKeyOIDCConnectEnabled]; absent {
-		settings.OIDCConnectEnabled = previousSettings.OIDCConnectEnabled
-	}
-	if _, absent := omitted[service.SettingKeyOIDCConnectIssuerURL]; absent {
-		settings.OIDCConnectIssuerURL = previousSettings.OIDCConnectIssuerURL
-	}
 	if err := h.settingService.UpdateSettingsWithAuthSourceDefaultsOmitting(c.Request.Context(), settings, authSourceDefaults, omitted); err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -2217,6 +2032,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 	payload := dto.SystemSettings{
 		SSOEnabled: updatedSettings.SSOEnabled, SSOOnlyEnabled: updatedSettings.SSOOnlyEnabled,
 		SSORegistrationEnabled: updatedSettings.SSORegistrationEnabled,
+		SSOIssuerURL:           updatedSettings.SSOIssuerURL,
 		SSOOrganization:        updatedSettings.SSOOrganization, SSOApplication: updatedSettings.SSOApplication,
 		RegistrationEnabled:                                    updatedSettings.RegistrationEnabled,
 		EmailVerifyEnabled:                                     updatedSettings.EmailVerifyEnabled,
@@ -2299,28 +2115,6 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		WeChatConnectScopes:                                    updatedSettings.WeChatConnectScopes,
 		WeChatConnectRedirectURL:                               updatedSettings.WeChatConnectRedirectURL,
 		WeChatConnectFrontendRedirectURL:                       updatedSettings.WeChatConnectFrontendRedirectURL,
-		OIDCConnectEnabled:                                     updatedSettings.OIDCConnectEnabled,
-		OIDCConnectProviderName:                                updatedSettings.OIDCConnectProviderName,
-		OIDCConnectClientID:                                    updatedSettings.OIDCConnectClientID,
-		OIDCConnectClientSecretConfigured:                      updatedSettings.OIDCConnectClientSecretConfigured,
-		OIDCConnectIssuerURL:                                   updatedSettings.OIDCConnectIssuerURL,
-		OIDCConnectDiscoveryURL:                                updatedSettings.OIDCConnectDiscoveryURL,
-		OIDCConnectAuthorizeURL:                                updatedSettings.OIDCConnectAuthorizeURL,
-		OIDCConnectTokenURL:                                    updatedSettings.OIDCConnectTokenURL,
-		OIDCConnectUserInfoURL:                                 updatedSettings.OIDCConnectUserInfoURL,
-		OIDCConnectJWKSURL:                                     updatedSettings.OIDCConnectJWKSURL,
-		OIDCConnectScopes:                                      updatedSettings.OIDCConnectScopes,
-		OIDCConnectRedirectURL:                                 updatedSettings.OIDCConnectRedirectURL,
-		OIDCConnectFrontendRedirectURL:                         updatedSettings.OIDCConnectFrontendRedirectURL,
-		OIDCConnectTokenAuthMethod:                             updatedSettings.OIDCConnectTokenAuthMethod,
-		OIDCConnectUsePKCE:                                     updatedSettings.OIDCConnectUsePKCE,
-		OIDCConnectValidateIDToken:                             updatedSettings.OIDCConnectValidateIDToken,
-		OIDCConnectAllowedSigningAlgs:                          updatedSettings.OIDCConnectAllowedSigningAlgs,
-		OIDCConnectClockSkewSeconds:                            updatedSettings.OIDCConnectClockSkewSeconds,
-		OIDCConnectRequireEmailVerified:                        updatedSettings.OIDCConnectRequireEmailVerified,
-		OIDCConnectUserInfoEmailPath:                           updatedSettings.OIDCConnectUserInfoEmailPath,
-		OIDCConnectUserInfoIDPath:                              updatedSettings.OIDCConnectUserInfoIDPath,
-		OIDCConnectUserInfoUsernamePath:                        updatedSettings.OIDCConnectUserInfoUsernamePath,
 		GitHubOAuthEnabled:                                     updatedSettings.GitHubOAuthEnabled,
 		GitHubOAuthClientID:                                    updatedSettings.GitHubOAuthClientID,
 		GitHubOAuthClientSecretConfigured:                      updatedSettings.GitHubOAuthClientSecretConfigured,

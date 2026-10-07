@@ -25,7 +25,7 @@ vi.mock('vue-i18n', async () => {
         if (key === 'auth.wechatProviderName') {
           return 'Mock WeChat'
         }
-        if (key === 'auth.oidc.signIn') {
+        if (key === 'auth.providerOAuth.signIn') {
           return `Continue with ${params?.providerName ?? ''}`.trim()
         }
         if (key === 'auth.oauthFlow.wechatSystemBrowserOnly') {

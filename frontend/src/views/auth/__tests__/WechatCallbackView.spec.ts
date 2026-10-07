@@ -74,22 +74,22 @@ vi.mock('vue-i18n', () => ({
       if (key === 'auth.oauthFlow.totpHint') {
         return `verify ${params?.account ?? ''}`.trim()
       }
-      if (key === 'auth.oidc.callbackTitle') {
+      if (key === 'auth.providerOAuth.callbackTitle') {
         return `Signing you in with ${params?.providerName ?? ''}`.trim()
       }
-      if (key === 'auth.oidc.callbackProcessing') {
+      if (key === 'auth.providerOAuth.callbackProcessing') {
         return `Completing login with ${params?.providerName ?? ''}`.trim()
       }
-      if (key === 'auth.oidc.invitationRequired') {
+      if (key === 'auth.providerOAuth.invitationRequired') {
         return `${params?.providerName ?? ''} invitation required`.trim()
       }
-      if (key === 'auth.oidc.completeRegistration') {
+      if (key === 'auth.providerOAuth.completeRegistration') {
         return 'Complete registration'
       }
-      if (key === 'auth.oidc.completing') {
+      if (key === 'auth.providerOAuth.completing') {
         return 'Completing'
       }
-      if (key === 'auth.oidc.backToLogin') {
+      if (key === 'auth.providerOAuth.backToLogin') {
         return 'Back to login'
       }
       if (key === 'auth.invitationCodePlaceholder') {
@@ -101,13 +101,13 @@ vi.mock('vue-i18n', () => ({
       if (key === 'auth.loginFailed') {
         return 'Login failed'
       }
-      if (key === 'auth.oidc.callbackHint') {
+      if (key === 'auth.providerOAuth.callbackHint') {
         return 'Callback hint'
       }
-      if (key === 'auth.oidc.callbackMissingToken') {
+      if (key === 'auth.providerOAuth.callbackMissingToken') {
         return 'Missing login token'
       }
-      if (key === 'auth.oidc.completeRegistrationFailed') {
+      if (key === 'auth.providerOAuth.completeRegistrationFailed') {
         return 'Complete registration failed'
       }
       return key

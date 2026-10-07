@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/casdoorcaptcha"
 	"github.com/stretchr/testify/require"
 )
 
@@ -136,14 +137,14 @@ func TestClientRejectsInvalidAccountsAndChallenges(t *testing.T) {
 				_, _ = w.Write([]byte(body))
 			}))
 			defer srv.Close()
-			_, _, err := New(Config{Issuer: srv.URL, Organization: "kano"}, nil).Login(context.Background(), "u", "pw")
+			_, _, err := New(Config{Issuer: srv.URL, Organization: "kano", Application: "admin/sub2api"}, nil).Login(context.Background(), "u", "pw")
 			require.ErrorIs(t, err, ErrIdentity)
 			require.NotContains(t, err.Error(), "sensitive")
 		})
 	}
 	for _, body := range []string{`{"status":"ok","msg":"NextMfa","data":{}}`, `{"status":"ok","msg":"NextMfa","data":[]}`, `{"status":"ok","msg":"NextMfa","data":[{"mfaType":""}]}`} {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(body)) }))
-		_, _, err := New(Config{Issuer: srv.URL}, nil).Login(context.Background(), "u", "pw")
+		_, _, err := New(Config{Issuer: srv.URL, Organization: "kano", Application: "admin/sub2api"}, nil).Login(context.Background(), "u", "pw")
 		require.ErrorIs(t, err, ErrIdentity)
 		srv.Close()
 	}
@@ -162,7 +163,7 @@ func TestClientSafeProviderErrors(t *testing.T) {
 				_ = json.NewEncoder(w).Encode(map[string]string{"status": "error", "msg": tc.message})
 			}))
 			defer srv.Close()
-			_, _, err := New(Config{Issuer: srv.URL}, nil).Login(context.Background(), "u", "pw")
+			_, _, err := New(Config{Issuer: srv.URL, Organization: "kano", Application: "admin/sub2api"}, nil).Login(context.Background(), "u", "pw")
 			require.ErrorIs(t, err, tc.want)
 		})
 	}
@@ -177,7 +178,7 @@ func TestClientSafeProviderErrors(t *testing.T) {
 			require.Equal(t, "u@example.com", r.Form.Get("dest"))
 			_ = json.NewEncoder(w).Encode(map[string]string{"status": "error", "msg": tc.message})
 		}))
-		err := New(Config{Issuer: srv.URL, Application: "admin/sub2api"}, nil).SendCode(context.Background(), "u@example.com")
+		err := New(Config{Issuer: srv.URL, Organization: "kano", Application: "admin/sub2api"}, nil).SendCode(context.Background(), "u@example.com")
 		require.ErrorIs(t, err, tc.want)
 		srv.Close()
 	}
@@ -188,7 +189,7 @@ func TestClientSafeProviderErrors(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			_ = json.NewEncoder(w).Encode(map[string]string{"status": "error", "msg": tc.message})
 		}))
-		_, err := New(Config{Issuer: srv.URL}, nil).Register(context.Background(), "u@example.com", "pw", "123", "U", "u")
+		_, err := New(Config{Issuer: srv.URL, Organization: "kano", Application: "admin/sub2api"}, nil).Register(context.Background(), "u@example.com", "pw", "123", "U", "u")
 		require.ErrorIs(t, err, tc.want)
 		srv.Close()
 	}
@@ -199,7 +200,7 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
 func TestClientTransportFailureAndRedirect(t *testing.T) {
-	client := New(Config{Issuer: "https://idp.example"}, roundTripFunc(func(*http.Request) (*http.Response, error) { return nil, errors.New("sensitive network error") }))
+	client := New(Config{Issuer: "https://idp.example", Organization: "kano", Application: "admin/sub2api"}, roundTripFunc(func(*http.Request) (*http.Response, error) { return nil, errors.New("sensitive network error") }))
 	_, _, err := client.Login(context.Background(), "u", "pw")
 	require.ErrorIs(t, err, ErrUnavailable)
 	for _, status := range []int{http.StatusServiceUnavailable, http.StatusTemporaryRedirect, http.StatusOK} {
@@ -208,10 +209,10 @@ func TestClientTransportFailureAndRedirect(t *testing.T) {
 			w.WriteHeader(status)
 			_, _ = fmt.Fprint(w, strings.Repeat("invalid", 200))
 		}))
-		_, _, err = New(Config{Issuer: srv.URL}, nil).Login(context.Background(), "u", "pw")
+		_, _, err = New(Config{Issuer: srv.URL, Organization: "kano", Application: "admin/sub2api"}, nil).Login(context.Background(), "u", "pw")
 		require.ErrorIs(t, err, ErrUnavailable)
 		srv.Close()
 	}
 	_, _, err = New(Config{Issuer: "://invalid"}, nil).Login(context.Background(), "u", "pw")
-	require.ErrorIs(t, err, ErrUnavailable)
+	require.ErrorIs(t, err, casdoorcaptcha.ErrInvalid)
 }

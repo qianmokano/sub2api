@@ -219,6 +219,9 @@ export default {
   // Auth
   auth: {
     sso: {
+      issuer: 'Passport address',
+      captcha: 'Passport verification',
+      refreshCaptcha: 'Refresh verification',
       registrationManagedTitle: 'Registration and accounts are managed by Kano Passport',
       registrationManagedHint: 'Passport manages customer registration, email rules, profiles, passwords and MFA. This gateway manages business access and initial grants. The in-page registration switch controls this entry only, not registration across Passport.',
       managePolicy: 'Open Passport administration',
@@ -232,7 +235,7 @@ export default {
       createAdministrator: 'Create local administrator',
       policyUnavailable: 'Account policy could not be loaded. Retry before editing.',
       registrationEntry: 'Allow Passport registration on this gateway',
-      title: 'kano Passport', account: 'Email or username', verification: 'Passport verification', method: 'Verification method', code: 'Verification code', verify: 'Verify and continue', sendCode: 'Send code', codeSent: 'Verification code sent; check your email', retryLogin: 'Passport created; sign in with the same account', manageAccount: 'Manage account in kano Passport', profileTitle: 'Account profile and security', profileManagedHint: 'Your nickname, avatar and password are managed by kano Passport. Nickname and avatar changes sync the next time you sign in to this gateway.', accountUnavailable: 'Passport account management is unavailable. Contact your administrator.', enabled: 'Enable in-page unified sign-in', only: 'Unified sign-in only (admin local recovery remains available)', registration: 'Allow Passport registration', organization: 'Casdoor organization', application: 'Casdoor application (organization/application)', settingsHint: 'Uses the OIDC issuer below. Unified registration is independent of local registration and email policies. Verify administrator password and MFA recovery before enabling unified sign-in only.'
+      title: 'kano Passport', account: 'Email or username', verification: 'Passport verification', method: 'Verification method', code: 'Verification code', verify: 'Verify and continue', sendCode: 'Send code', codeSent: 'Verification code sent; check your email', retryLogin: 'Passport created; sign in with the same account', manageAccount: 'Manage account in kano Passport', profileTitle: 'Account profile and security', profileManagedHint: 'Your nickname, avatar and password are managed by kano Passport. Nickname and avatar changes sync the next time you sign in to this gateway.', accountUnavailable: 'Passport account management is unavailable. Contact your administrator.', enabled: 'Enable in-page unified sign-in', only: 'Unified sign-in only (admin local recovery remains available)', registration: 'Allow Passport registration', organization: 'Casdoor organization', application: 'Casdoor application (organization/application)', settingsHint: 'Uses the independent Passport address, organization and application configured here. Unified registration is independent of local registration and email policies. Verify administrator password and MFA recovery before enabling unified sign-in only.'
     },
     welcomeBack: 'Welcome Back',
     signInToAccount: 'Sign in to your account to continue',
@@ -379,7 +382,7 @@ export default {
     emailOAuth: {
       signIn: 'Continue with {providerName}'
     },
-    oidc: {
+    providerOAuth: {
       signIn: 'Continue with {providerName}',
       callbackTitle: 'Signing you in with {providerName}',
       callbackProcessing: 'Completing login with {providerName}, please wait...',
@@ -426,7 +429,6 @@ export default {
     linuxdoCallbackPageTitle: 'LinuxDo Sign-In Callback',
     dingtalkCallbackPageTitle: 'DingTalk Sign-In Callback',
     dingtalkProviderName: 'DingTalk',
-    oidcCallbackPageTitle: 'OIDC Sign-In Callback',
     oauthCallbackPageTitle: 'OAuth Callback',
     wechatProviderName: 'WeChat',
     wechatCallbackPageTitle: 'WeChat Sign-In Callback',

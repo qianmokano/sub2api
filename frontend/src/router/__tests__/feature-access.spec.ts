@@ -8,6 +8,7 @@ type NavigationGuard = (
 
 const routerHarness = vi.hoisted(() => ({
   guard: null as NavigationGuard | null,
+  routes: [] as { name?: string; meta?: Record<string, unknown> }[],
 }))
 
 const authStore = vi.hoisted(() => ({
@@ -33,13 +34,16 @@ const appStore = vi.hoisted(() => ({
 
 vi.mock('vue-router', () => ({
   createWebHistory: vi.fn(() => ({})),
-  createRouter: vi.fn(() => ({
-    beforeEach: vi.fn((guard: NavigationGuard) => {
-      routerHarness.guard = guard
-    }),
-    afterEach: vi.fn(),
-    onError: vi.fn(),
-  })),
+  createRouter: vi.fn((options) => {
+    routerHarness.routes = options.routes
+    return {
+      beforeEach: vi.fn((guard: NavigationGuard) => {
+        routerHarness.guard = guard
+      }),
+      afterEach: vi.fn(),
+      onError: vi.fn(),
+    }
+  }),
 }))
 
 vi.mock('@/stores/auth', () => ({
@@ -86,7 +90,7 @@ function createDeferred<T>() {
   return { promise, resolve }
 }
 
-function runGuard(meta: Record<string, unknown>, path: string) {
+function runGuard(meta: Record<string, unknown>, path: string, name = 'FeatureRoute') {
   if (!routerHarness.guard) {
     throw new Error('router guard was not registered')
   }
@@ -96,7 +100,7 @@ function runGuard(meta: Record<string, unknown>, path: string) {
     {
       path,
       fullPath: path,
-      name: 'FeatureRoute',
+      name,
       params: {},
       meta: { requiresAuth: true, ...meta },
     },
@@ -115,6 +119,7 @@ describe('feature route guard', () => {
     authStore.isAuthenticated = true
     authStore.isAdmin = false
     authStore.isSimpleMode = false
+    appStore.backendModeEnabled = false
     appStore.publicSettingsLoaded = false
     appStore.cachedPublicSettings = null
     appStore.fetchPublicSettings.mockReset()
@@ -179,10 +184,33 @@ describe('feature route guard', () => {
   })
 })
 
+describe('removed callback navigation', () => {
+  it.each([
+    [false, false, false],
+    [false, false, true],
+    [true, false, false],
+    [true, false, true],
+    [true, true, false],
+    [true, true, true],
+  ])('shows 404 with authenticated=%s, admin=%s, backendMode=%s', async (authenticated, admin, backendMode) => {
+    authStore.isAuthenticated = authenticated
+    authStore.isAdmin = admin
+    appStore.backendModeEnabled = backendMode
+    const route = routerHarness.routes.find(record => record.name === 'NotFound')
+    expect(route?.meta?.requiresAuth).toBe(false)
+    const { navigation, next } = runGuard(route!.meta!, '/auth/oidc/callback', 'NotFound')
+    await navigation
+    expect(next).toHaveBeenCalledOnce()
+    expect(next).toHaveBeenCalledWith()
+  })
+})
+
 describe('subscription route guard (opt-out flag)', () => {
   beforeEach(() => {
+    authStore.isAuthenticated = true
     authStore.isAdmin = false
     authStore.isSimpleMode = false
+    appStore.backendModeEnabled = false
     appStore.publicSettingsLoaded = true
     appStore.fetchPublicSettings.mockReset()
   })

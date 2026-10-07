@@ -219,6 +219,9 @@ export default {
   // Auth
   auth: {
     sso: {
+      issuer: '通行证地址',
+      captcha: '通行证人机验证',
+      refreshCaptcha: '刷新验证',
       registrationManagedTitle: '注册与账户由 Kano 通行证管理',
       registrationManagedHint: '客户的注册、邮箱规则、资料、密码和双重验证由通行证管理。本网关保留业务权限与首次建号权益；页内注册开关只控制本网关入口，不会关闭通行证全站注册。',
       managePolicy: '前往通行证后台管理',
@@ -232,7 +235,7 @@ export default {
       createAdministrator: '创建本地管理员',
       policyUnavailable: '账户管理策略加载失败，请重试后再编辑。',
       registrationEntry: '允许在本网关页面注册通行证',
-      title: 'kano 通行证', account: '邮箱或用户名', verification: '通行证二步验证', method: '验证方式', code: '验证码', verify: '验证并继续', sendCode: '发送验证码', codeSent: '验证码已发送，请查收邮箱', retryLogin: '通行证已创建，请使用同一账号登录', manageAccount: '前往 kano 通行证管理账户', profileTitle: '账户资料与安全', profileManagedHint: '昵称、头像和密码由 kano 通行证统一管理。修改昵称或头像后，下次登录本网关时同步。', accountUnavailable: '通行证管理入口暂不可用，请联系管理员。', enabled: '启用页内统一登录', only: '仅允许统一登录（管理员保留本地应急入口）', registration: '允许通行证注册', organization: 'Casdoor 组织', application: 'Casdoor 应用（组织/应用）', settingsHint: '复用下方 OIDC issuer。统一注册独立于本站注册与邮箱策略；启用仅统一登录前，请确认管理员本地密码和二步验证可用。'
+      title: 'kano 通行证', account: '邮箱或用户名', verification: '通行证二步验证', method: '验证方式', code: '验证码', verify: '验证并继续', sendCode: '发送验证码', codeSent: '验证码已发送，请查收邮箱', retryLogin: '通行证已创建，请使用同一账号登录', manageAccount: '前往 kano 通行证管理账户', profileTitle: '账户资料与安全', profileManagedHint: '昵称、头像和密码由 kano 通行证统一管理。修改昵称或头像后，下次登录本网关时同步。', accountUnavailable: '通行证管理入口暂不可用，请联系管理员。', enabled: '启用页内统一登录', only: '仅允许统一登录（管理员保留本地应急入口）', registration: '允许通行证注册', organization: 'Casdoor 组织', application: 'Casdoor 应用（组织/应用）', settingsHint: '使用这里独立配置的通行证地址、组织和应用。统一注册独立于本站注册与邮箱策略；启用仅统一登录前，请确认管理员本地密码和二步验证可用。'
     },
     welcomeBack: '欢迎回来',
     signInToAccount: '登录您的账户以继续',
@@ -378,7 +381,7 @@ export default {
     emailOAuth: {
       signIn: '使用 {providerName} 登录'
     },
-    oidc: {
+    providerOAuth: {
       signIn: '使用 {providerName} 登录',
       callbackTitle: '正在完成 {providerName} 登录',
       callbackProcessing: '正在验证 {providerName} 登录信息，请稍候...',
@@ -424,7 +427,6 @@ export default {
     linuxdoCallbackPageTitle: 'LinuxDo 登录回调',
     dingtalkCallbackPageTitle: '钉钉登录回调',
     dingtalkProviderName: '钉钉',
-    oidcCallbackPageTitle: 'OIDC 登录回调',
     oauthCallbackPageTitle: 'OAuth 回调',
     wechatProviderName: '微信',
     wechatCallbackPageTitle: '微信登录回调',

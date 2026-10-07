@@ -129,16 +129,6 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
-    path: '/auth/oidc/callback',
-    name: 'OIDCOAuthCallback',
-    component: () => import('@/views/auth/OidcCallbackView.vue'),
-    meta: {
-      requiresAuth: false,
-      title: 'OIDC OAuth Callback',
-      titleKey: 'auth.oidcCallbackPageTitle'
-    }
-  },
-  {
     path: '/forgot-password',
     name: 'ForgotPassword',
     component: () => import('@/views/auth/ForgotPasswordView.vue'),
@@ -721,6 +711,7 @@ const routes: RouteRecordRaw[] = [
     name: 'NotFound',
     component: () => import('@/views/NotFoundView.vue'),
     meta: {
+      requiresAuth: false,
       title: '404 Not Found'
     }
   }
@@ -757,7 +748,6 @@ const BACKEND_MODE_CALLBACK_PATHS = [
   '/auth/linuxdo/callback',
   '/auth/dingtalk/callback',
   '/auth/dingtalk/email-completion',
-  '/auth/oidc/callback',
   '/auth/wechat/callback',
   '/auth/wechat/payment/callback',
 ]
@@ -818,6 +808,10 @@ router.beforeEach(async (to, _from, next) => {
 
   // If route doesn't require auth, allow access
   if (!requiresAuth) {
+    if (to.name === 'NotFound') {
+      next()
+      return
+    }
     // If already authenticated and trying to access login/register, redirect to appropriate dashboard
     if (authStore.isAuthenticated && (to.path === '/login' || to.path === '/register')) {
       // In backend mode, non-admin users should NOT be redirected away from login

@@ -71,6 +71,11 @@ vi.mock('@/api/auth', () => ({
   startOAuthLogin: vi.fn()
 }))
 
+vi.mock('@/api/sso', async () => ({
+  ...await vi.importActual<typeof import('@/api/sso')>('@/api/sso'),
+  prepareCaptcha: vi.fn(async () => ({ required: false }))
+}))
+
 function mountLogin() {
   return mount(LoginView, {
     global: {
@@ -166,12 +171,12 @@ describe('LoginView registration entry', () => {
     wrapper.unmount()
   })
 
-  it('resumes OIDC local MFA and removes its temporary token from the URL', async () => {
+  it('ignores removed OIDC MFA fragments without issuing credentials', async () => {
     window.history.replaceState(null, '', '/login#sso_totp_token=temporary&email_masked=user&redirect=%2Fkeys')
     const wrapper = mountLogin()
     await flushPromises()
-    expect(window.location.hash).toBe('')
-    expect(wrapper.findComponent({ name: 'TotpLoginModal' }).props('tempToken')).toBe('temporary')
+    expect(wrapper.findComponent({ name: 'TotpLoginModal' }).exists()).toBe(false)
+    expect(loginSSOMock).not.toHaveBeenCalled()
     expect(pushMock).not.toHaveBeenCalled()
     wrapper.unmount()
     window.history.replaceState(null, '', '/')

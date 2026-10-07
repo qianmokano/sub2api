@@ -31,6 +31,7 @@ type SystemSettings struct {
 	SSOEnabled                          bool                     `json:"sso_enabled"`
 	SSOOnlyEnabled                      bool                     `json:"sso_only_enabled"`
 	SSORegistrationEnabled              bool                     `json:"sso_registration_enabled"`
+	SSOIssuerURL                        string                   `json:"sso_issuer_url"`
 	SSOOrganization                     string                   `json:"sso_organization"`
 	SSOApplication                      string                   `json:"sso_application"`
 	SSOAdminURL                         string                   `json:"sso_admin_url"`
@@ -120,29 +121,6 @@ type SystemSettings struct {
 	WeChatConnectScopes                    string `json:"wechat_connect_scopes"`
 	WeChatConnectRedirectURL               string `json:"wechat_connect_redirect_url"`
 	WeChatConnectFrontendRedirectURL       string `json:"wechat_connect_frontend_redirect_url"`
-
-	OIDCConnectEnabled                bool   `json:"oidc_connect_enabled"`
-	OIDCConnectProviderName           string `json:"oidc_connect_provider_name"`
-	OIDCConnectClientID               string `json:"oidc_connect_client_id"`
-	OIDCConnectClientSecretConfigured bool   `json:"oidc_connect_client_secret_configured"`
-	OIDCConnectIssuerURL              string `json:"oidc_connect_issuer_url"`
-	OIDCConnectDiscoveryURL           string `json:"oidc_connect_discovery_url"`
-	OIDCConnectAuthorizeURL           string `json:"oidc_connect_authorize_url"`
-	OIDCConnectTokenURL               string `json:"oidc_connect_token_url"`
-	OIDCConnectUserInfoURL            string `json:"oidc_connect_userinfo_url"`
-	OIDCConnectJWKSURL                string `json:"oidc_connect_jwks_url"`
-	OIDCConnectScopes                 string `json:"oidc_connect_scopes"`
-	OIDCConnectRedirectURL            string `json:"oidc_connect_redirect_url"`
-	OIDCConnectFrontendRedirectURL    string `json:"oidc_connect_frontend_redirect_url"`
-	OIDCConnectTokenAuthMethod        string `json:"oidc_connect_token_auth_method"`
-	OIDCConnectUsePKCE                bool   `json:"oidc_connect_use_pkce"`
-	OIDCConnectValidateIDToken        bool   `json:"oidc_connect_validate_id_token"`
-	OIDCConnectAllowedSigningAlgs     string `json:"oidc_connect_allowed_signing_algs"`
-	OIDCConnectClockSkewSeconds       int    `json:"oidc_connect_clock_skew_seconds"`
-	OIDCConnectRequireEmailVerified   bool   `json:"oidc_connect_require_email_verified"`
-	OIDCConnectUserInfoEmailPath      string `json:"oidc_connect_userinfo_email_path"`
-	OIDCConnectUserInfoIDPath         string `json:"oidc_connect_userinfo_id_path"`
-	OIDCConnectUserInfoUsernamePath   string `json:"oidc_connect_userinfo_username_path"`
 
 	GitHubOAuthEnabled                bool   `json:"github_oauth_enabled"`
 	GitHubOAuthClientID               string `json:"github_oauth_client_id"`
@@ -417,8 +395,6 @@ type PublicSettings struct {
 	WeChatOAuthOpenEnabled              bool                     `json:"wechat_oauth_open_enabled"`
 	WeChatOAuthMPEnabled                bool                     `json:"wechat_oauth_mp_enabled"`
 	WeChatOAuthMobileEnabled            bool                     `json:"wechat_oauth_mobile_enabled"`
-	OIDCOAuthEnabled                    bool                     `json:"oidc_oauth_enabled"`
-	OIDCOAuthProviderName               string                   `json:"oidc_oauth_provider_name"`
 	GitHubOAuthEnabled                  bool                     `json:"github_oauth_enabled"`
 	GoogleOAuthEnabled                  bool                     `json:"google_oauth_enabled"`
 	BackendModeEnabled                  bool                     `json:"backend_mode_enabled"`

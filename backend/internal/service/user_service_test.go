@@ -523,7 +523,7 @@ func TestGetProfileIdentitySummaries_DoesNotTreatOAuthOnlyCompatEmailAsAlternati
 	require.False(t, summaries.OIDC.CanUnbind)
 
 	_, err = svc.UnbindUserAuthProvider(context.Background(), 10, "oidc")
-	require.ErrorIs(t, err, ErrIdentityUnbindLastMethod)
+	require.ErrorIs(t, err, ErrIdentityProviderInvalid)
 	require.Empty(t, repo.unboundProviders)
 }
 
@@ -654,7 +654,7 @@ func TestGetProfileIdentitySummaries_UsesBindStartRoute(t *testing.T) {
 	)
 	require.Equal(
 		t,
-		"/api/v1/auth/oauth/oidc/bind/start?intent=bind_current_user&redirect=%2Fsettings%2Fprofile",
+		"",
 		summaries.OIDC.BindStartPath,
 	)
 	require.Equal(

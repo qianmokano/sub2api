@@ -218,8 +218,6 @@ const props = withDefaults(
     user: User | null
     linuxdoEnabled?: boolean
     dingtalkEnabled?: boolean
-    oidcEnabled?: boolean
-    oidcProviderName?: string
     wechatEnabled?: boolean
     wechatOpenEnabled?: boolean
     wechatMpEnabled?: boolean
@@ -229,8 +227,6 @@ const props = withDefaults(
   {
     linuxdoEnabled: false,
     dingtalkEnabled: false,
-    oidcEnabled: false,
-    oidcProviderName: 'OIDC',
     wechatEnabled: false,
     wechatOpenEnabled: undefined,
     wechatMpEnabled: undefined,
@@ -412,7 +408,7 @@ function isProviderEnabledForBinding(provider: BindableProvider): boolean {
     return props.dingtalkEnabled
   }
   if (provider === 'oidc') {
-    return props.oidcEnabled
+    return false
   }
   return resolvedWeChatBinding.value.mode !== null
 }
@@ -450,13 +446,10 @@ const providerItems = computed(() => [
   },
   {
     provider: 'oidc' as const,
-    label: t('profile.authBindings.providers.oidc', { providerName: props.oidcProviderName }),
+    label: t('profile.authBindings.providers.oidc'),
     bound: getBindingStatus('oidc'),
-    canBind:
-      !getBindingStatus('oidc') &&
-      isProviderEnabledForBinding('oidc') &&
-      (getBindingDetails('oidc')?.can_bind ?? true),
-    canUnbind: Boolean(getBindingStatus('oidc') && getBindingDetails('oidc')?.can_unbind),
+    canBind: false,
+    canUnbind: false,
     details: getBindingDetails('oidc'),
   },
   {
@@ -483,7 +476,7 @@ function providerInitial(provider: UserAuthProvider): string {
     return 'W'
   }
   if (provider === 'oidc') {
-    return 'O'
+    return 'K'
   }
   return 'E'
 }

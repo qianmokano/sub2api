@@ -92,8 +92,6 @@ func (h *SettingHandler) GetPublicSettings(c *gin.Context) {
 		WeChatOAuthOpenEnabled:              settings.WeChatOAuthOpenEnabled,
 		WeChatOAuthMPEnabled:                settings.WeChatOAuthMPEnabled,
 		WeChatOAuthMobileEnabled:            settings.WeChatOAuthMobileEnabled,
-		OIDCOAuthEnabled:                    settings.OIDCOAuthEnabled,
-		OIDCOAuthProviderName:               settings.OIDCOAuthProviderName,
 		GitHubOAuthEnabled:                  settings.GitHubOAuthEnabled,
 		GoogleOAuthEnabled:                  settings.GoogleOAuthEnabled,
 		BackendModeEnabled:                  settings.BackendModeEnabled,

@@ -15,6 +15,7 @@ type SystemSettings struct {
 	SSOEnabled                          bool
 	SSOOnlyEnabled                      bool
 	SSORegistrationEnabled              bool
+	SSOIssuerURL                        string
 	SSOOrganization                     string
 	SSOApplication                      string
 	SSOAdminURL                         string
@@ -116,30 +117,7 @@ type SystemSettings struct {
 	WeChatConnectRedirectURL               string
 	WeChatConnectFrontendRedirectURL       string
 
-	// Generic OIDC OAuth 登录
-	OIDCConnectEnabled                bool
-	OIDCConnectProviderName           string
-	OIDCConnectClientID               string
-	OIDCConnectClientSecret           string
-	OIDCConnectClientSecretConfigured bool
-	OIDCConnectIssuerURL              string
-	OIDCConnectDiscoveryURL           string
-	OIDCConnectAuthorizeURL           string
-	OIDCConnectTokenURL               string
-	OIDCConnectUserInfoURL            string
-	OIDCConnectJWKSURL                string
-	OIDCConnectScopes                 string
-	OIDCConnectRedirectURL            string
-	OIDCConnectFrontendRedirectURL    string
-	OIDCConnectTokenAuthMethod        string
-	OIDCConnectUsePKCE                bool
-	OIDCConnectValidateIDToken        bool
-	OIDCConnectAllowedSigningAlgs     string
-	OIDCConnectClockSkewSeconds       int
-	OIDCConnectRequireEmailVerified   bool
-	OIDCConnectUserInfoEmailPath      string
-	OIDCConnectUserInfoIDPath         string
-	OIDCConnectUserInfoUsernamePath   string
+	// In-page Passport authentication
 
 	// GitHub / Google 邮箱快捷登录
 	GitHubOAuthEnabled                bool
@@ -388,8 +366,6 @@ type PublicSettings struct {
 	BackendModeEnabled       bool
 	PaymentEnabled           bool
 	PaymentBalanceDisabled   bool
-	OIDCOAuthEnabled         bool
-	OIDCOAuthProviderName    string
 	GitHubOAuthEnabled       bool
 	GoogleOAuthEnabled       bool
 	Version                  string

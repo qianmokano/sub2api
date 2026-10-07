@@ -6,7 +6,7 @@
       >
         W
       </span>
-      {{ t('auth.oidc.signIn', { providerName }) }}
+      {{ t('auth.providerOAuth.signIn', { providerName }) }}
     </button>
 
     <p
