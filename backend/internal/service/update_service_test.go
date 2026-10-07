@@ -69,6 +69,25 @@ func TestUpdateServicePerformUpdateNoUpdateReturnsSentinel(t *testing.T) {
 	require.ErrorIs(t, err, ErrNoUpdateAvailable)
 }
 
+func TestUpdateServiceManagedForkVersionFormats(t *testing.T) {
+	for _, version := range []string{"v0.2.14-1", "0.2.14-2", "v0.2.15-1", "v0.2.14-kano.1"} {
+		t.Run(version, func(t *testing.T) {
+			svc := NewUpdateService(nil, nil, version, "kano-container")
+			info, err := svc.CheckUpdate(context.Background(), true)
+			require.NoError(t, err)
+			require.Equal(t, version, info.CurrentVersion)
+			require.Equal(t, version, info.LatestVersion)
+			require.False(t, info.HasUpdate)
+			require.Equal(t, "kano-container", info.BuildType)
+			require.ErrorIs(t, svc.PerformUpdate(context.Background()), ErrForkUpdateManaged)
+			require.ErrorIs(t, svc.RollbackToVersion(context.Background(), "0.2.13"), ErrForkUpdateManaged)
+			versions, err := svc.ListRollbackVersions(context.Background())
+			require.NoError(t, err)
+			require.Empty(t, versions)
+		})
+	}
+}
+
 func newRollbackTestService(current string, releases []*GitHubRelease) *UpdateService {
 	return NewUpdateService(
 		&updateServiceCacheStub{},
