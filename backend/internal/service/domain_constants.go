@@ -340,29 +340,7 @@ const (
 	SettingKeyWeChatConnectRedirectURL         = "wechat_connect_redirect_url"
 	SettingKeyWeChatConnectFrontendRedirectURL = "wechat_connect_frontend_redirect_url"
 
-	// Generic OIDC OAuth 登录设置
-	SettingKeyOIDCConnectEnabled              = "oidc_connect_enabled"
-	SettingKeyOIDCConnectProviderName         = "oidc_connect_provider_name"
-	SettingKeyOIDCConnectClientID             = "oidc_connect_client_id"
-	SettingKeyOIDCConnectClientSecret         = "oidc_connect_client_secret"
-	SettingKeyOIDCConnectIssuerURL            = "oidc_connect_issuer_url"
-	SettingKeyOIDCConnectDiscoveryURL         = "oidc_connect_discovery_url"
-	SettingKeyOIDCConnectAuthorizeURL         = "oidc_connect_authorize_url"
-	SettingKeyOIDCConnectTokenURL             = "oidc_connect_token_url"
-	SettingKeyOIDCConnectUserInfoURL          = "oidc_connect_userinfo_url"
-	SettingKeyOIDCConnectJWKSURL              = "oidc_connect_jwks_url"
-	SettingKeyOIDCConnectScopes               = "oidc_connect_scopes"
-	SettingKeyOIDCConnectRedirectURL          = "oidc_connect_redirect_url"
-	SettingKeyOIDCConnectFrontendRedirectURL  = "oidc_connect_frontend_redirect_url"
-	SettingKeyOIDCConnectTokenAuthMethod      = "oidc_connect_token_auth_method"
-	SettingKeyOIDCConnectUsePKCE              = "oidc_connect_use_pkce"
-	SettingKeyOIDCConnectValidateIDToken      = "oidc_connect_validate_id_token"
-	SettingKeyOIDCConnectAllowedSigningAlgs   = "oidc_connect_allowed_signing_algs"
-	SettingKeyOIDCConnectClockSkewSeconds     = "oidc_connect_clock_skew_seconds"
-	SettingKeyOIDCConnectRequireEmailVerified = "oidc_connect_require_email_verified"
-	SettingKeyOIDCConnectUserInfoEmailPath    = "oidc_connect_userinfo_email_path"
-	SettingKeyOIDCConnectUserInfoIDPath       = "oidc_connect_userinfo_id_path"
-	SettingKeyOIDCConnectUserInfoUsernamePath = "oidc_connect_userinfo_username_path"
+	// In-page Passport authentication
 
 	// GitHub / Google 邮箱快捷登录设置
 	SettingKeyGitHubOAuthEnabled             = "github_oauth_enabled"

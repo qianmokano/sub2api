@@ -5,11 +5,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"strings"
 	"testing"
 
-	"github.com/Wei-Shaw/sub2api/internal/pkg/casdoor"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/stretchr/testify/require"
 )
@@ -48,7 +46,7 @@ func TestSSOEndpointsCompleteAuthenticationWithoutLeakingProviderState(t *testin
 	http.DefaultTransport = srv.Client().Transport
 	t.Cleanup(func() { http.DefaultTransport = previous })
 	h, client := newOAuthPendingFlowTestHandlerWithDependencies(t, oauthPendingFlowTestHandlerOptions{settingValues: map[string]string{
-		service.SettingKeySSOEnabled: "true", service.SettingKeySSOOnlyEnabled: "true", service.SettingKeySSORegistrationEnabled: "true", service.SettingKeyOIDCConnectEnabled: "true", service.SettingKeyOIDCConnectIssuerURL: srv.URL,
+		service.SettingKeySSOEnabled: "true", service.SettingKeySSOOnlyEnabled: "true", service.SettingKeySSORegistrationEnabled: "true", service.SettingKeySSOIssuerURL: srv.URL,
 	}})
 	entity, err := client.User.Create().SetEmail("bound@example.com").SetPasswordHash("hash").SetRole(service.RoleUser).SetStatus(service.StatusActive).Save(context.Background())
 	require.NoError(t, err)
@@ -99,43 +97,5 @@ func TestSSOEndpointsCompleteAuthenticationWithoutLeakingProviderState(t *testin
 	require.Equal(t, http.StatusForbidden, w.Code)
 	c, w = ssoRequest("/api/v1/auth/sso/mfa", `{"challenge":"`+strings.Repeat("a", 64)+`","mfa_type":"otp","passcode":"123456"}`)
 	h.SSOMFA(c)
-	require.Equal(t, http.StatusForbidden, w.Code)
-}
-
-func TestSSOOIDCCallbackNoMFAIssuesTokensAfterSubjectResolution(t *testing.T) {
-	h, client := newOAuthPendingFlowTestHandlerWithDependencies(t, oauthPendingFlowTestHandlerOptions{settingValues: map[string]string{
-		service.SettingKeySSOEnabled: "true", service.SettingKeySSOOnlyEnabled: "true", service.SettingKeyOIDCConnectEnabled: "true", service.SettingKeyOIDCConnectIssuerURL: "https://auth.example",
-	}})
-	entity, err := client.User.Create().SetEmail("bound@example.com").SetPasswordHash("hash").SetRole(service.RoleUser).SetStatus(service.StatusActive).Save(context.Background())
-	require.NoError(t, err)
-	_, err = client.AuthIdentity.Create().SetUserID(entity.ID).SetProviderType("oidc").SetProviderKey("https://auth.example").SetProviderSubject("bound-sub").Save(context.Background())
-	require.NoError(t, err)
-	c, w := ssoRequest("/api/v1/auth/oauth/oidc/callback", `{}`)
-	avatar := "https://auth.example/avatar.png"
-	require.True(t, h.trySSOOIDCCallback(c, "/auth/oidc/callback", "/keys", oauthIntentLogin, "https://auth.example", &casdoor.Identity{Subject: "bound-sub", Email: "changed@example.com", DisplayName: "New nickname", AvatarURL: &avatar}))
-	stored, err := client.User.Get(context.Background(), entity.ID)
-	require.NoError(t, err)
-	require.Equal(t, entity.Email, stored.Email)
-	require.Equal(t, "New nickname", stored.Username)
-	profile, err := h.userService.GetProfile(context.Background(), entity.ID)
-	require.NoError(t, err)
-	require.Equal(t, avatar, profile.AvatarURL)
-	location, err := url.Parse(w.Header().Get("Location"))
-	require.NoError(t, err)
-	fragment, err := url.ParseQuery(location.Fragment)
-	require.NoError(t, err)
-	require.NotEmpty(t, fragment.Get("access_token"))
-	require.NotEmpty(t, fragment.Get("refresh_token"))
-	require.Equal(t, "/keys", fragment.Get("redirect"))
-	c, w = ssoRequest("/api/v1/auth/oauth/oidc/callback", `{}`)
-	require.True(t, h.trySSOOIDCCallback(c, "/auth/oidc/callback", "/keys", oauthIntentLogin, "https://wrong.example", &casdoor.Identity{Subject: "bound-sub"}))
-	require.NotContains(t, w.Header().Get("Location"), "access_token")
-	_, err = client.User.UpdateOneID(entity.ID).SetStatus("disabled").Save(context.Background())
-	require.NoError(t, err)
-	c, w = ssoRequest("/api/v1/auth/oauth/oidc/callback", `{}`)
-	require.True(t, h.trySSOOIDCCallback(c, "/auth/oidc/callback", "/keys", oauthIntentLogin, "https://auth.example", &casdoor.Identity{Subject: "bound-sub"}))
-	require.NotContains(t, w.Header().Get("Location"), "access_token")
-	c, w = ssoRequest("/api/v1/auth/sso/password-login", `{}`)
-	h.finishSSOLogin(c, &service.User{Status: "disabled"})
 	require.Equal(t, http.StatusForbidden, w.Code)
 }

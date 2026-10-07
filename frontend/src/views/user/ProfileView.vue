@@ -8,8 +8,6 @@
         :user="user"
         :linuxdo-enabled="linuxdoOAuthEnabled"
         :dingtalk-enabled="dingtalkOAuthEnabled"
-        :oidc-enabled="oidcOAuthEnabled"
-        :oidc-provider-name="oidcOAuthProviderName"
         :wechat-enabled="wechatOAuthEnabled"
         :wechat-open-enabled="wechatOAuthOpenEnabled"
         :wechat-mp-enabled="wechatOAuthMPEnabled"
@@ -82,8 +80,6 @@ const dingtalkOAuthEnabled = ref(false)
 const wechatOAuthEnabled = ref(false)
 const wechatOAuthOpenEnabled = ref<boolean | undefined>(undefined)
 const wechatOAuthMPEnabled = ref<boolean | undefined>(undefined)
-const oidcOAuthEnabled = ref(false)
-const oidcOAuthProviderName = ref('OIDC')
 const passkeyEnabled = ref(false)
 
 onMounted(async () => {
@@ -109,8 +105,6 @@ onMounted(async () => {
       wechatOAuthMPEnabled.value = typeof settings.wechat_oauth_mp_enabled === 'boolean'
         ? settings.wechat_oauth_mp_enabled
         : undefined
-      oidcOAuthEnabled.value = settings.oidc_oauth_enabled ?? false
-      oidcOAuthProviderName.value = settings.oidc_oauth_provider_name || 'OIDC'
       passkeyEnabled.value = settings.passkey_enabled === true
     })
     .catch((error) => {

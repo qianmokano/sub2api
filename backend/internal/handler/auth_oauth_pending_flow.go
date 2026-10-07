@@ -541,15 +541,12 @@ func (h *AuthHandler) findOAuthIdentityUser(ctx context.Context, identity servic
 }
 
 func (h *AuthHandler) BindLinuxDoOAuthLogin(c *gin.Context) { h.bindPendingOAuthLogin(c, "linuxdo") }
-func (h *AuthHandler) BindOIDCOAuthLogin(c *gin.Context)    { h.bindPendingOAuthLogin(c, "oidc") }
 func (h *AuthHandler) BindWeChatOAuthLogin(c *gin.Context)  { h.bindPendingOAuthLogin(c, "wechat") }
 func (h *AuthHandler) BindPendingOAuthLogin(c *gin.Context) { h.bindPendingOAuthLogin(c, "") }
 
 func (h *AuthHandler) CreateLinuxDoOAuthAccount(c *gin.Context) {
 	h.createPendingOAuthAccount(c, "linuxdo")
 }
-
-func (h *AuthHandler) CreateOIDCOAuthAccount(c *gin.Context) { h.createPendingOAuthAccount(c, "oidc") }
 
 func (h *AuthHandler) CreateWeChatOAuthAccount(c *gin.Context) {
 	h.createPendingOAuthAccount(c, "wechat")
@@ -814,23 +811,11 @@ func oauthIdentityIssuer(session *dbent.PendingAuthSession) *string {
 	if session == nil {
 		return nil
 	}
-	switch strings.TrimSpace(session.ProviderType) {
-	case "oidc":
-		issuer := strings.TrimSpace(session.ProviderKey)
-		if issuer == "" {
-			issuer = pendingSessionStringValue(session.UpstreamIdentityClaims, "issuer")
-		}
-		if issuer == "" {
-			return nil
-		}
-		return &issuer
-	default:
-		issuer := pendingSessionStringValue(session.UpstreamIdentityClaims, "issuer")
-		if issuer == "" {
-			return nil
-		}
-		return &issuer
+	issuer := pendingSessionStringValue(session.UpstreamIdentityClaims, "issuer")
+	if issuer == "" {
+		return nil
 	}
+	return &issuer
 }
 
 func ensurePendingOAuthIdentityForUser(ctx context.Context, tx *dbent.Tx, session *dbent.PendingAuthSession, userID int64) (*dbent.AuthIdentity, error) {
@@ -1474,6 +1459,10 @@ func readPendingOAuthBrowserSession(c *gin.Context, h *AuthHandler) (*service.Au
 		return nil, nil, clearCookies, err
 	}
 
+	if session == nil || strings.EqualFold(strings.TrimSpace(session.ProviderType), "oidc") {
+		clearCookies()
+		return nil, nil, clearCookies, service.ErrPendingAuthSessionNotFound
+	}
 	return svc, session, clearCookies, nil
 }
 
@@ -1510,13 +1499,6 @@ func clearOAuthLogoutCookies(c *gin.Context) {
 	clearCookie(c, linuxDoOAuthRedirectCookie, secureCookie)
 	clearCookie(c, linuxDoOAuthIntentCookieName, secureCookie)
 	clearCookie(c, linuxDoOAuthBindUserCookieName, secureCookie)
-
-	oidcClearCookie(c, oidcOAuthStateCookieName, secureCookie)
-	oidcClearCookie(c, oidcOAuthVerifierCookie, secureCookie)
-	oidcClearCookie(c, oidcOAuthRedirectCookie, secureCookie)
-	oidcClearCookie(c, oidcOAuthNonceCookie, secureCookie)
-	oidcClearCookie(c, oidcOAuthIntentCookieName, secureCookie)
-	oidcClearCookie(c, oidcOAuthBindUserCookieName, secureCookie)
 
 	wechatClearCookie(c, wechatOAuthStateCookieName, secureCookie)
 	wechatClearCookie(c, wechatOAuthRedirectCookieName, secureCookie)

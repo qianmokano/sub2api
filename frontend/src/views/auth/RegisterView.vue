@@ -126,6 +126,8 @@
           </div>
         </div>
 
+        <SSOCaptcha v-if="ssoEnabled" v-model="passportCaptchaAnswer" :challenge="passportCaptchaChallenge" @refresh="refreshPassportCaptcha" />
+
         <!-- Invitation Code Input (Required when enabled) -->
         <div v-if="invitationCodeEnabled">
           <label for="invitation_code" class="input-label">
@@ -345,14 +347,6 @@
           :show-divider="false"
           @start="handleOAuthStart"
         />
-        <OidcOAuthSection
-          v-if="oidcOAuthEnabled"
-          :disabled="registrationActionDisabled"
-          :provider-name="oidcOAuthProviderName"
-          :aff-code="formData.aff_code"
-          :show-divider="false"
-          @start="handleOAuthStart"
-        />
       </div>
     </div>
 
@@ -373,12 +367,14 @@
 
 <script setup lang="ts">
 import { computed, ref, reactive, onMounted, onUnmounted, watch } from 'vue'
+import SSOCaptcha from '@/components/auth/SSOCaptcha.vue'
+import { useSSOCaptcha } from '@/composables/useSSOCaptcha'
+import type { SSOCaptchaAction } from '@/api/sso'
 import { sendCode as sendSSOCode, isSSOMFARequired } from '@/api/sso'
 import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { AuthLayout } from '@/components/layout'
 import LinuxDoOAuthSection from '@/components/auth/LinuxDoOAuthSection.vue'
-import OidcOAuthSection from '@/components/auth/OidcOAuthSection.vue'
 import WechatOAuthSection from '@/components/auth/WechatOAuthSection.vue'
 import EmailOAuthButtons from '@/components/auth/EmailOAuthButtons.vue'
 import LoginAgreementPrompt from '@/components/auth/LoginAgreementPrompt.vue'
@@ -430,6 +426,9 @@ const confirmPassword = ref('')
 
 // Public settings
 const registrationEnabled = ref<boolean>(true)
+const passportCaptcha = useSSOCaptcha()
+const { challenge: passportCaptchaChallenge, answer: passportCaptchaAnswer } = passportCaptcha
+const passportCaptchaAction = ref<SSOCaptchaAction>('register')
 const ssoEnabled = ref(false)
 const ssoCode = ref('')
 const ssoCodeCountdown = ref(0)
@@ -456,8 +455,6 @@ const aliyunCaptchaRegion = ref<string>('cn')
 const siteName = ref<string>('Sub2API')
 const linuxdoOAuthEnabled = ref<boolean>(false)
 const wechatOAuthEnabled = ref<boolean>(false)
-const oidcOAuthEnabled = ref<boolean>(false)
-const oidcOAuthProviderName = ref<string>('OIDC')
 const githubOAuthEnabled = ref<boolean>(false)
 const googleOAuthEnabled = ref<boolean>(false)
 const registrationEmailSuffixWhitelist = ref<string[]>([])
@@ -542,7 +539,6 @@ const showOAuthLogin = computed(
   () =>
     linuxdoOAuthEnabled.value ||
     wechatOAuthEnabled.value ||
-    oidcOAuthEnabled.value ||
     githubOAuthEnabled.value ||
     googleOAuthEnabled.value
 )
@@ -593,8 +589,6 @@ onMounted(async () => {
     siteName.value = settings.site_name || 'Sub2API'
     linuxdoOAuthEnabled.value = settings.linuxdo_oauth_enabled
     wechatOAuthEnabled.value = isWeChatWebOAuthEnabled(settings)
-    oidcOAuthEnabled.value = settings.oidc_oauth_enabled
-    oidcOAuthProviderName.value = settings.oidc_oauth_provider_name || 'OIDC'
     githubOAuthEnabled.value = settings.github_oauth_enabled
     googleOAuthEnabled.value = settings.google_oauth_enabled
     registrationEmailSuffixWhitelist.value = normalizeRegistrationEmailSuffixWhitelist(
@@ -1016,6 +1010,13 @@ function validateForm(): boolean {
 
 // ==================== Form Handlers ====================
 
+async function refreshPassportCaptcha() {
+  try { await passportCaptcha.refresh(passportCaptchaAction.value, formData.email) }
+  catch (error) { errorMessage.value = buildRegistrationErrorMessage(error, t('auth.registrationFailed')) }
+}
+
+watch(() => formData.email, () => passportCaptcha.invalidate())
+
 async function handleSSOSendCode(): Promise<void> {
   if (!validateEmail(formData.email) || agreementGateActive.value || !registrationEnabled.value) {
     appStore.showError(t('auth.invalidEmail'))
@@ -1024,7 +1025,13 @@ async function handleSSOSendCode(): Promise<void> {
   if (!(await acquireActionProof())) return
   isLoading.value = true
   try {
+    passportCaptchaAction.value = 'register-send-code'
+    if (!(await passportCaptcha.ensure('register-send-code', formData.email))) {
+      errorMessage.value = t('auth.completeVerification')
+      return
+    }
     const result = await sendSSOCode({ email: formData.email, ...ssoCaptchaProof() })
+    passportCaptcha.invalidate()
     ssoCodeCountdown.value = result.countdown || 60
     if (ssoCodeTimer) clearInterval(ssoCodeTimer)
     ssoCodeTimer = setInterval(() => {
@@ -1033,6 +1040,7 @@ async function handleSSOSendCode(): Promise<void> {
     }, 1000)
     appStore.showSuccess(t('auth.sso.codeSent'))
   } catch (error) {
+    passportCaptcha.invalidate()
     appStore.showError(extractI18nErrorMessage(error, t, 'auth.errors', t('auth.registrationFailed')))
   } finally {
     resetCaptchaProof()
@@ -1042,6 +1050,7 @@ async function handleSSOSendCode(): Promise<void> {
 
 function ssoCaptchaProof() {
   return {
+    captcha: passportCaptcha.proof(),
     turnstile_token: turnstileEnabled.value || aliyunCaptchaEnabled.value ? turnstileToken.value : undefined,
     tencent_captcha_ticket: tencentCaptchaEnabled.value ? turnstileToken.value : undefined,
     tencent_captcha_randstr: tencentCaptchaEnabled.value ? tencentCaptchaRandstr.value : undefined
@@ -1103,9 +1112,15 @@ async function handleRegister(): Promise<void> {
 
   try {
     if (ssoEnabled.value) {
+      passportCaptchaAction.value = 'register'
+      if (!(await passportCaptcha.ensure('register', formData.email))) {
+        errorMessage.value = t('auth.completeVerification')
+        return
+      }
       const response = await authStore.registerSSO({ email: formData.email, password: formData.password, code: ssoCode.value, ...ssoCaptchaProof() })
       formData.password = ''
       confirmPassword.value = ''
+      passportCaptcha.invalidate()
       if (isSSOMFARequired(response) || isTotp2FARequired(response)) {
         appStore.showSuccess(t('auth.sso.retryLogin'))
         await router.push('/login')
@@ -1163,6 +1178,7 @@ async function handleRegister(): Promise<void> {
     // Redirect to dashboard
     await router.push('/dashboard')
   } catch (error: unknown) {
+    passportCaptcha.invalidate()
     // Handle registration error
     errorMessage.value = buildRegistrationErrorMessage(error, t('auth.registrationFailed'))
 

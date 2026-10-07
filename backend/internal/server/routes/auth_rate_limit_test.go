@@ -52,6 +52,11 @@ func TestAuthRoutesRateLimitFailCloseWhenRedisUnavailable(t *testing.T) {
 
 	router := newAuthRoutesTestRouter(rdb)
 	paths := []string{
+		"/api/v1/auth/sso/captcha",
+		"/api/v1/auth/sso/password-login",
+		"/api/v1/auth/sso/mfa",
+		"/api/v1/auth/sso/register/send-code",
+		"/api/v1/auth/sso/register",
 		"/api/v1/auth/register",
 		"/api/v1/auth/login",
 		"/api/v1/auth/login/2fa",
@@ -70,4 +75,25 @@ func TestAuthRoutesRateLimitFailCloseWhenRedisUnavailable(t *testing.T) {
 		require.Equal(t, http.StatusTooManyRequests, w.Code, "path=%s", path)
 		require.Contains(t, w.Body.String(), "rate limit exceeded", "path=%s", path)
 	}
+}
+
+func TestAuthRoutesRemoveOIDCRedirectEntrypoints(t *testing.T) {
+	router := newAuthRoutesTestRouter(nil)
+	for _, path := range []string{
+		"/oauth/oidc/start", "/oauth/oidc/bind/start", "/oauth/oidc/callback",
+		"/oauth/oidc/complete-registration", "/oauth/oidc/bind-login", "/oauth/oidc/create-account",
+	} {
+		for _, method := range []string{http.MethodGet, http.MethodPost} {
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, httptest.NewRequest(method, "/api/v1/auth"+path, nil))
+			require.Equal(t, http.StatusNotFound, w.Code, method+" "+path)
+		}
+	}
+	registered := map[string]bool{}
+	for _, route := range router.Routes() {
+		registered[route.Method+" "+route.Path] = true
+	}
+	require.True(t, registered["POST /api/v1/auth/sso/captcha"])
+	require.True(t, registered["GET /api/v1/auth/oauth/google/start"])
+	require.True(t, registered["GET /api/v1/auth/oauth/linuxdo/callback"])
 }

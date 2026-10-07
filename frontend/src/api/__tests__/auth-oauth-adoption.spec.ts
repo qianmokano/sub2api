@@ -94,36 +94,6 @@ describe('oauth adoption auth api', () => {
     })
   })
 
-  it('posts oidc invitation completion with adoption decisions', async () => {
-    const { completeOIDCOAuthRegistration } = await import('@/api/auth')
-
-    await completeOIDCOAuthRegistration('invite-code', {
-      adoptDisplayName: false,
-      adoptAvatar: true
-    })
-
-    expect(post).toHaveBeenCalledWith('/auth/oauth/oidc/complete-registration', {
-      invitation_code: 'invite-code',
-      adopt_display_name: false,
-      adopt_avatar: true
-    })
-  })
-
-  it('posts oidc create-account completion with adoption decisions', async () => {
-    const { createPendingOIDCOAuthAccount } = await import('@/api/auth')
-
-    await createPendingOIDCOAuthAccount('invite-code', {
-      adoptDisplayName: true,
-      adoptAvatar: false
-    })
-
-    expect(post).toHaveBeenCalledWith('/auth/oauth/oidc/complete-registration', {
-      invitation_code: 'invite-code',
-      adopt_display_name: true,
-      adopt_avatar: false
-    })
-  })
-
   it('posts wechat invitation completion with adoption decisions', async () => {
     const { completeWeChatOAuthRegistration } = await import('@/api/auth')
 

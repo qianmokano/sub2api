@@ -37,7 +37,7 @@ vi.mock('vue-i18n', async (importOriginal) => {
         if (key === 'profile.authBindings.providers.linuxdo') return 'LinuxDo'
         if (key === 'profile.authBindings.providers.dingtalk') return 'DingTalk'
         if (key === 'profile.authBindings.providers.wechat') return 'WeChat'
-        if (key === 'profile.authBindings.providers.oidc') return params?.providerName || 'OIDC'
+        if (key === 'profile.authBindings.providers.oidc') return 'kano Passport'
         if (key === 'profile.authBindings.source.avatar') {
           return `Avatar synced from ${params?.providerName || 'provider'}`
         }
@@ -155,15 +155,14 @@ describe('ProfileInfoCard', () => {
     expect(wrapper.text()).toContain('Username synced from LinuxDo')
   })
 
-  it('uses the configured OIDC provider name in source hints', () => {
+  it('labels historical OIDC identity sources as kano Passport', () => {
     const wrapper = mount(ProfileInfoCard, {
       props: {
         user: createUser({
           profile_sources: {
             username: { provider: 'oidc', source: 'oidc' }
           }
-        }),
-        oidcProviderName: 'ExampleID'
+        })
       },
       global: {
         stubs: {
@@ -172,7 +171,7 @@ describe('ProfileInfoCard', () => {
       }
     })
 
-    expect(wrapper.text()).toContain('Username synced from ExampleID')
+    expect(wrapper.text()).toContain('Username synced from kano Passport')
   })
 
   it('does not display synthetic oauth-only emails as a real bound email', () => {

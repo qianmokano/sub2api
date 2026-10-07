@@ -84,7 +84,6 @@ func oauthStartHandlers() map[string]func(*AuthHandler, *gin.Context) {
 		"linuxdo":  func(h *AuthHandler, c *gin.Context) { h.LinuxDoOAuthStart(c) },
 		"dingtalk": func(h *AuthHandler, c *gin.Context) { h.DingTalkOAuthStart(c) },
 		"wechat":   func(h *AuthHandler, c *gin.Context) { h.WeChatOAuthStart(c) },
-		"oidc":     func(h *AuthHandler, c *gin.Context) { h.OIDCOAuthStart(c) },
 	}
 }
 

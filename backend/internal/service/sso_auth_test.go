@@ -10,6 +10,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/casdoor"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/casdoorcaptcha"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/stretchr/testify/require"
 )
@@ -23,17 +24,21 @@ type ssoProviderStub struct {
 	sentEmail        string
 }
 
-func (s *ssoProviderStub) Login(context.Context, string, string) (*casdoor.Identity, *casdoor.Session, error) {
+func (s *ssoProviderStub) PrepareCaptcha(context.Context, string, string) (*casdoorcaptcha.Challenge, error) {
+	return &casdoorcaptcha.Challenge{}, s.err
+}
+
+func (s *ssoProviderStub) Login(context.Context, string, string, ...*casdoorcaptcha.Proof) (*casdoor.Identity, *casdoor.Session, error) {
 	return s.identity, s.session, s.err
 }
 func (s *ssoProviderStub) CompleteMFA(context.Context, *casdoor.Session, string, string) (*casdoor.Identity, error) {
 	return s.identity, s.err
 }
-func (s *ssoProviderStub) SendCode(_ context.Context, email string) error {
+func (s *ssoProviderStub) SendCode(_ context.Context, email string, _ ...*casdoorcaptcha.Proof) error {
 	s.sentEmail = email
 	return s.err
 }
-func (s *ssoProviderStub) Register(_ context.Context, _, _, _, display, username string) (*casdoor.Identity, error) {
+func (s *ssoProviderStub) Register(_ context.Context, _, _, _, display, username string, _ ...*casdoorcaptcha.Proof) (*casdoor.Identity, error) {
 	s.registerUsername = username
 	s.registerDisplay = display
 	return s.identity, s.err
@@ -64,7 +69,7 @@ func (s *ssoStoreStub) Consume(context.Context, string, string) (bool, error) {
 }
 
 func newSSOTestService() (*SSOService, *ssoProviderStub, *ssoStoreStub, *settingRepoStub) {
-	repo := &settingRepoStub{values: map[string]string{SettingKeySSOEnabled: "true", SettingKeySSORegistrationEnabled: "true", SettingKeyOIDCConnectEnabled: "true", SettingKeyOIDCConnectIssuerURL: "https://auth.example"}}
+	repo := &settingRepoStub{values: map[string]string{SettingKeySSOEnabled: "true", SettingKeySSORegistrationEnabled: "true", SettingKeySSOIssuerURL: "https://auth.example"}}
 	settings := NewSettingService(repo, &config.Config{})
 	provider := &ssoProviderStub{identity: &casdoor.Identity{Subject: "subject", Email: "u@example.com", EmailVerified: true}}
 	store := &ssoStoreStub{consume: true}
@@ -107,6 +112,29 @@ func TestSSOLoginChallengeAndValidation(t *testing.T) {
 	require.ErrorIs(t, err, ErrSSODisabled)
 	repo.err = errors.New("settings offline")
 	_, err = svc.Login(ctx, "u", "pw")
+	require.ErrorIs(t, err, ErrServiceUnavailable)
+}
+
+func TestSSOCaptchaPreparationPolicies(t *testing.T) {
+	svc, provider, _, repo := newSSOTestService()
+	ctx := context.Background()
+	for _, action := range []string{casdoorcaptcha.ActionLogin, casdoorcaptcha.ActionSendCode, casdoorcaptcha.ActionRegister} {
+		challenge, err := svc.PrepareCaptcha(ctx, action, "u@example.com")
+		require.NoError(t, err)
+		require.False(t, challenge.Required)
+	}
+	_, err := svc.PrepareCaptcha(ctx, "callback", "u@example.com")
+	require.Equal(t, "SSO_CAPTCHA_INVALID", infraerrors.Reason(err))
+	_, err = svc.PrepareCaptcha(ctx, casdoorcaptcha.ActionRegister, "bad-email")
+	require.Error(t, err)
+	provider.err = casdoorcaptcha.ErrUnsupported
+	_, err = svc.PrepareCaptcha(ctx, casdoorcaptcha.ActionLogin, "u@example.com")
+	require.Equal(t, "SSO_CAPTCHA_UNSUPPORTED", infraerrors.Reason(err))
+	repo.values[SettingKeySSORegistrationEnabled] = "false"
+	_, err = svc.PrepareCaptcha(ctx, casdoorcaptcha.ActionSendCode, "u@example.com")
+	require.ErrorIs(t, err, ErrRegDisabled)
+	repo.err = errors.New("storage unavailable")
+	_, err = svc.PrepareCaptcha(ctx, casdoorcaptcha.ActionLogin, "u@example.com")
 	require.ErrorIs(t, err, ErrServiceUnavailable)
 }
 
@@ -178,8 +206,8 @@ func TestSSOSettingsDependenciesAndFailClosed(t *testing.T) {
 	policy, err := svc.settings.GetSSOSettings(context.Background())
 	require.NoError(t, err)
 	require.Equal(t, "admin/sub2api", policy.Config.Application)
-	require.NoError(t, validateSSOConfig(true, policy.Config))
-	require.NoError(t, validateSSOConfig(true, casdoor.Config{Issuer: "https://auth.example", Organization: "kano", Application: "admin/sub2api"}))
+	require.NoError(t, validateSSOConfig(policy.Config))
+	require.NoError(t, validateSSOConfig(casdoor.Config{Issuer: "https://auth.example", Organization: "kano", Application: "admin/sub2api"}))
 	for _, cfg := range []casdoor.Config{
 		{Issuer: "http://auth.example", Organization: "kano", Application: "kano/sub2api"},
 		{Issuer: "https://user:pass@auth.example", Organization: "kano", Application: "kano/sub2api"},
@@ -189,13 +217,12 @@ func TestSSOSettingsDependenciesAndFailClosed(t *testing.T) {
 		{Issuer: "https://auth.example", Organization: "kano", Application: "admin/"},
 		{Issuer: "https://auth.example", Organization: "kano", Application: "admin/sub2api/extra"},
 	} {
-		require.Error(t, validateSSOConfig(true, cfg))
+		require.Error(t, validateSSOConfig(cfg))
 	}
-	require.Error(t, validateSSOConfig(false, policy.Config))
 	require.Error(t, validateSSOSettings(&SystemSettings{SSOOnlyEnabled: true}))
 	require.Error(t, validateSSOSettings(&SystemSettings{SSORegistrationEnabled: true}))
 	require.NoError(t, validateSSOSettings(&SystemSettings{}))
-	require.NoError(t, validateSSOSettings(&SystemSettings{SSOEnabled: true, OIDCConnectEnabled: true, OIDCConnectIssuerURL: "https://auth.example"}))
+	require.NoError(t, validateSSOSettings(&SystemSettings{SSOEnabled: true, SSOIssuerURL: "https://auth.example", SSOOrganization: "kano", SSOApplication: "admin/sub2api"}))
 	require.Equal(t, "https://auth.example/account", svc.settings.ssoAccountURL(repo.values))
 	require.Equal(t, "https://auth.example/forget/sub2api", svc.settings.ssoPasswordResetURL(repo.values))
 	repo.values[SettingKeySSOOrganization] = "another-org"
@@ -203,11 +230,11 @@ func TestSSOSettingsDependenciesAndFailClosed(t *testing.T) {
 	require.Equal(t, "https://auth.example/login/another-org", svc.settings.ssoAccountURL(repo.values))
 	require.Equal(t, "https://auth.example/forget/another-app", svc.settings.ssoPasswordResetURL(repo.values))
 	for _, issuer := range []string{"javascript:invalid", "https://auth.example?secret=hidden", "https://auth.example/path", "https://user:pass@auth.example", "https://auth.example#hidden"} {
-		require.Empty(t, svc.settings.ssoAccountURL(map[string]string{SettingKeyOIDCConnectIssuerURL: issuer}))
-		require.Empty(t, svc.settings.ssoPasswordResetURL(map[string]string{SettingKeyOIDCConnectIssuerURL: issuer}))
+		require.Empty(t, svc.settings.ssoAccountURL(map[string]string{SettingKeySSOIssuerURL: issuer}))
+		require.Empty(t, svc.settings.ssoPasswordResetURL(map[string]string{SettingKeySSOIssuerURL: issuer}))
 	}
-	require.Empty(t, svc.settings.ssoAccountURL(map[string]string{SettingKeyOIDCConnectIssuerURL: "https://auth.example", SettingKeySSOApplication: "malformed"}))
-	require.Empty(t, svc.settings.ssoAccountURL(map[string]string{SettingKeyOIDCConnectIssuerURL: "javascript:invalid"}))
+	require.Empty(t, svc.settings.ssoAccountURL(map[string]string{SettingKeySSOIssuerURL: "https://auth.example", SettingKeySSOApplication: "malformed"}))
+	require.Empty(t, svc.settings.ssoAccountURL(map[string]string{SettingKeySSOIssuerURL: "javascript:invalid"}))
 	repo.err = errors.New("db offline")
 	_, err = svc.settings.GetSSOSettings(context.Background())
 	require.ErrorIs(t, err, ErrServiceUnavailable)

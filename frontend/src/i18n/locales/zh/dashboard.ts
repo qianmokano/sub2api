@@ -979,7 +979,7 @@ export default {
         email: '邮箱',
         linuxdo: 'LinuxDo',
         dingtalk: '钉钉',
-        oidc: '{providerName}',
+        oidc: 'kano 通行证',
         wechat: '微信',
       },
       notes: {

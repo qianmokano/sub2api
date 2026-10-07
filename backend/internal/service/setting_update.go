@@ -166,6 +166,7 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	updates[SettingKeySSOEnabled] = strconv.FormatBool(settings.SSOEnabled)
 	updates[SettingKeySSOOnlyEnabled] = strconv.FormatBool(settings.SSOOnlyEnabled)
 	updates[SettingKeySSORegistrationEnabled] = strconv.FormatBool(settings.SSORegistrationEnabled)
+	updates[SettingKeySSOIssuerURL] = settings.SSOIssuerURL
 	updates[SettingKeySSOOrganization] = settings.SSOOrganization
 	updates[SettingKeySSOApplication] = settings.SSOApplication
 
@@ -274,32 +275,6 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	updates[SettingKeyDingTalkConnectSyncCorpEmailAttrName] = settings.DingTalkConnectSyncCorpEmailAttrName
 	updates[SettingKeyDingTalkConnectSyncDisplayNameAttrName] = settings.DingTalkConnectSyncDisplayNameAttrName
 	updates[SettingKeyDingTalkConnectSyncDeptAttrName] = settings.DingTalkConnectSyncDeptAttrName
-
-	// Generic OIDC OAuth 登录
-	updates[SettingKeyOIDCConnectEnabled] = strconv.FormatBool(settings.OIDCConnectEnabled)
-	updates[SettingKeyOIDCConnectProviderName] = settings.OIDCConnectProviderName
-	updates[SettingKeyOIDCConnectClientID] = settings.OIDCConnectClientID
-	updates[SettingKeyOIDCConnectIssuerURL] = settings.OIDCConnectIssuerURL
-	updates[SettingKeyOIDCConnectDiscoveryURL] = settings.OIDCConnectDiscoveryURL
-	updates[SettingKeyOIDCConnectAuthorizeURL] = settings.OIDCConnectAuthorizeURL
-	updates[SettingKeyOIDCConnectTokenURL] = settings.OIDCConnectTokenURL
-	updates[SettingKeyOIDCConnectUserInfoURL] = settings.OIDCConnectUserInfoURL
-	updates[SettingKeyOIDCConnectJWKSURL] = settings.OIDCConnectJWKSURL
-	updates[SettingKeyOIDCConnectScopes] = settings.OIDCConnectScopes
-	updates[SettingKeyOIDCConnectRedirectURL] = settings.OIDCConnectRedirectURL
-	updates[SettingKeyOIDCConnectFrontendRedirectURL] = settings.OIDCConnectFrontendRedirectURL
-	updates[SettingKeyOIDCConnectTokenAuthMethod] = settings.OIDCConnectTokenAuthMethod
-	updates[SettingKeyOIDCConnectUsePKCE] = strconv.FormatBool(settings.OIDCConnectUsePKCE)
-	updates[SettingKeyOIDCConnectValidateIDToken] = strconv.FormatBool(settings.OIDCConnectValidateIDToken)
-	updates[SettingKeyOIDCConnectAllowedSigningAlgs] = settings.OIDCConnectAllowedSigningAlgs
-	updates[SettingKeyOIDCConnectClockSkewSeconds] = strconv.Itoa(settings.OIDCConnectClockSkewSeconds)
-	updates[SettingKeyOIDCConnectRequireEmailVerified] = strconv.FormatBool(settings.OIDCConnectRequireEmailVerified)
-	updates[SettingKeyOIDCConnectUserInfoEmailPath] = settings.OIDCConnectUserInfoEmailPath
-	updates[SettingKeyOIDCConnectUserInfoIDPath] = settings.OIDCConnectUserInfoIDPath
-	updates[SettingKeyOIDCConnectUserInfoUsernamePath] = settings.OIDCConnectUserInfoUsernamePath
-	if settings.OIDCConnectClientSecret != "" {
-		updates[SettingKeyOIDCConnectClientSecret] = settings.OIDCConnectClientSecret
-	}
 
 	// GitHub / Google 邮箱快捷登录
 	updates[SettingKeyGitHubOAuthEnabled] = strconv.FormatBool(settings.GitHubOAuthEnabled)

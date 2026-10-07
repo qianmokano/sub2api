@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/casdoor"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/casdoorcaptcha"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 )
 
@@ -29,10 +30,11 @@ type SSOChallengeStore interface {
 }
 
 type ssoProvider interface {
-	Login(context.Context, string, string) (*casdoor.Identity, *casdoor.Session, error)
+	Login(context.Context, string, string, ...*casdoorcaptcha.Proof) (*casdoor.Identity, *casdoor.Session, error)
+	PrepareCaptcha(context.Context, string, string) (*casdoorcaptcha.Challenge, error)
 	CompleteMFA(context.Context, *casdoor.Session, string, string) (*casdoor.Identity, error)
-	SendCode(context.Context, string) error
-	Register(context.Context, string, string, string, string, string) (*casdoor.Identity, error)
+	SendCode(context.Context, string, ...*casdoorcaptcha.Proof) error
+	Register(context.Context, string, string, string, string, string, ...*casdoorcaptcha.Proof) (*casdoor.Identity, error)
 }
 
 type SSOChallenge struct {
@@ -55,7 +57,10 @@ type SSOService struct {
 func NewSSOService(settings *SettingService, auth *AuthService, challenges SSOChallengeStore) *SSOService {
 	return &SSOService{
 		settings: settings, auth: auth, challenges: challenges,
-		newClient: func(cfg casdoor.Config) ssoProvider { return casdoor.New(cfg, nil) },
+		newClient: func(cfg casdoor.Config) ssoProvider {
+			store, _ := challenges.(casdoorcaptcha.Store)
+			return casdoor.New(cfg, nil, store)
+		},
 	}
 }
 
@@ -67,7 +72,7 @@ func (s *SSOService) config(ctx context.Context, registration bool) (*SSOSetting
 	if !cfg.Enabled {
 		return nil, ErrSSODisabled
 	}
-	if err := validateSSOConfig(cfg.OIDCEnabled, cfg.Config); err != nil {
+	if err := validateSSOConfig(cfg.Config); err != nil {
 		return nil, err
 	}
 	if registration && !cfg.RegistrationEnabled {
@@ -76,7 +81,25 @@ func (s *SSOService) config(ctx context.Context, registration bool) (*SSOSetting
 	return cfg, nil
 }
 
-func (s *SSOService) Login(ctx context.Context, account, password string) (*SSOLoginResult, error) {
+func (s *SSOService) PrepareCaptcha(ctx context.Context, action, account string) (*casdoorcaptcha.Challenge, error) {
+	if action != casdoorcaptcha.ActionLogin && action != casdoorcaptcha.ActionSendCode && action != casdoorcaptcha.ActionRegister {
+		return nil, ssoProviderError(casdoorcaptcha.ErrInvalid)
+	}
+	cfg, err := s.config(ctx, action != casdoorcaptcha.ActionLogin)
+	if err != nil {
+		return nil, err
+	}
+	if action != casdoorcaptcha.ActionLogin {
+		account, err = ssoRegistrationEmail(account)
+		if err != nil {
+			return nil, err
+		}
+	}
+	challenge, err := s.newClient(cfg.Config).PrepareCaptcha(ctx, action, account)
+	return challenge, ssoProviderError(err)
+}
+
+func (s *SSOService) Login(ctx context.Context, account, password string, proofs ...*casdoorcaptcha.Proof) (*SSOLoginResult, error) {
 	cfg, err := s.config(ctx, false)
 	if err != nil {
 		return nil, err
@@ -84,7 +107,7 @@ func (s *SSOService) Login(ctx context.Context, account, password string) (*SSOL
 	if strings.TrimSpace(account) == "" || password == "" || len(account) > 255 || len(password) > 4096 {
 		return nil, ErrInvalidCredentials
 	}
-	identity, session, err := s.newClient(cfg.Config).Login(ctx, account, password)
+	identity, session, err := s.newClient(cfg.Config).Login(ctx, account, password, proofs...)
 	if err != nil {
 		return nil, ssoProviderError(err)
 	}
@@ -142,7 +165,7 @@ func (s *SSOService) CompleteMFA(ctx context.Context, token, method, code string
 	return s.auth.ResolveSSOIdentity(ctx, cfg.Config.Issuer, identity)
 }
 
-func (s *SSOService) SendCode(ctx context.Context, email string) error {
+func (s *SSOService) SendCode(ctx context.Context, email string, proofs ...*casdoorcaptcha.Proof) error {
 	cfg, err := s.config(ctx, true)
 	if err != nil {
 		return err
@@ -151,10 +174,10 @@ func (s *SSOService) SendCode(ctx context.Context, email string) error {
 	if err != nil {
 		return err
 	}
-	return ssoProviderError(s.newClient(cfg.Config).SendCode(ctx, email))
+	return ssoProviderError(s.newClient(cfg.Config).SendCode(ctx, email, proofs...))
 }
 
-func (s *SSOService) Register(ctx context.Context, email, password, code, displayName string) (*User, error) {
+func (s *SSOService) Register(ctx context.Context, email, password, code, displayName string, proofs ...*casdoorcaptcha.Proof) (*User, error) {
 	cfg, err := s.config(ctx, true)
 	if err != nil {
 		return nil, err
@@ -175,7 +198,7 @@ func (s *SSOService) Register(ctx context.Context, email, password, code, displa
 	if strings.TrimSpace(displayName) == "" {
 		displayName = strings.SplitN(email, "@", 2)[0]
 	}
-	identity, err := s.newClient(cfg.Config).Register(ctx, email, password, strings.TrimSpace(code), displayName, username)
+	identity, err := s.newClient(cfg.Config).Register(ctx, email, password, strings.TrimSpace(code), displayName, username, proofs...)
 	if err != nil {
 		return nil, ssoProviderError(err)
 	}
@@ -211,8 +234,12 @@ func ssoProviderError(err error) error {
 		return ErrInvalidCredentials
 	case errors.Is(err, casdoor.ErrFrozen):
 		return infraerrors.TooManyRequests("SSO_ACCOUNT_LOCKED", "Too many attempts; please try again later")
+	case errors.Is(err, casdoorcaptcha.ErrInvalid), errors.Is(err, casdoorcaptcha.ErrChallenge):
+		return infraerrors.BadRequest("SSO_CAPTCHA_INVALID", "Verification expired or is invalid; please try again")
+	case errors.Is(err, casdoorcaptcha.ErrUnsupported):
+		return infraerrors.BadRequest("SSO_CAPTCHA_UNSUPPORTED", "The Passport verification method is unsupported")
 	case errors.Is(err, casdoor.ErrCaptcha):
-		return infraerrors.BadRequest("SSO_CAPTCHA_REQUIRED", "Use the kano Passport button to complete verification")
+		return infraerrors.BadRequest("SSO_CAPTCHA_REQUIRED", "Complete the Passport verification on this page")
 	case errors.Is(err, casdoor.ErrMFACode):
 		return infraerrors.BadRequest("SSO_MFA_CODE_INVALID", "Incorrect verification code; please try again")
 	case errors.Is(err, casdoor.ErrCode):

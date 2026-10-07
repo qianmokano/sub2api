@@ -356,6 +356,8 @@ func (s *UserService) GetProfileIdentitySummaries(ctx context.Context, userID in
 	}
 
 	s.applyExplicitProviderAvailability(ctx, &summaries)
+	disableIdentityBindAction(&summaries.OIDC)
+	summaries.OIDC.CanBind, summaries.OIDC.CanUnbind, summaries.OIDC.BindStartPath = false, false, ""
 	return summaries, nil
 }
 
@@ -366,7 +368,6 @@ func (s *UserService) applyExplicitProviderAvailability(ctx context.Context, sum
 
 	settings, err := s.settingRepo.GetMultiple(ctx, []string{
 		SettingKeyLinuxDoConnectEnabled,
-		SettingKeyOIDCConnectEnabled,
 		SettingKeyWeChatConnectEnabled,
 		SettingKeyWeChatConnectOpenEnabled,
 		SettingKeyWeChatConnectMPEnabled,
@@ -383,9 +384,6 @@ func (s *UserService) applyExplicitProviderAvailability(ctx context.Context, sum
 	}
 	if raw, ok := settings[SettingKeyDingTalkConnectEnabled]; ok && strings.TrimSpace(raw) != "" && raw != "true" {
 		disableIdentityBindAction(&summaries.DingTalk)
-	}
-	if raw, ok := settings[SettingKeyOIDCConnectEnabled]; ok && strings.TrimSpace(raw) != "" && raw != "true" {
-		disableIdentityBindAction(&summaries.OIDC)
 	}
 	if raw, ok := settings[SettingKeyWeChatConnectEnabled]; ok && strings.TrimSpace(raw) != "" {
 		if raw != "true" {
@@ -433,7 +431,7 @@ func (s *UserService) UnbindUserAuthProvider(ctx context.Context, userID int64, 
 
 func (s *UserService) UnbindUserAuthProviderWithResult(ctx context.Context, userID int64, provider string) (*User, bool, error) {
 	provider = normalizeUserIdentityProvider(provider)
-	if provider == "" || provider == "email" {
+	if provider == "" || provider == "email" || provider == "oidc" {
 		return nil, false, ErrIdentityProviderInvalid
 	}
 
@@ -879,8 +877,6 @@ func buildUserIdentityBindAuthorizeURL(provider, redirectTo string) (string, err
 	switch provider {
 	case "linuxdo":
 		path = "/api/v1/auth/oauth/linuxdo/bind/start"
-	case "oidc":
-		path = "/api/v1/auth/oauth/oidc/bind/start"
 	case "wechat":
 		path = "/api/v1/auth/oauth/wechat/bind/start"
 	case "dingtalk":

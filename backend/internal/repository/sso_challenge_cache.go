@@ -16,6 +16,24 @@ func NewSSOChallengeCache(client *redis.Client) service.SSOChallengeStore {
 	return &ssoChallengeCache{client: client}
 }
 
+func (s *ssoChallengeCache) Set(ctx context.Context, key, value string, ttl time.Duration) (bool, error) {
+	if s.client == nil {
+		return false, service.ErrServiceUnavailable
+	}
+	return s.client.SetNX(ctx, key, value, ttl).Result()
+}
+
+func (s *ssoChallengeCache) Take(ctx context.Context, key string) (string, bool, error) {
+	if s.client == nil {
+		return "", false, service.ErrServiceUnavailable
+	}
+	value, err := s.client.GetDel(ctx, key).Result()
+	if err == redis.Nil {
+		return "", false, nil
+	}
+	return value, err == nil, err
+}
+
 func ssoChallengeKeys(token string) []string {
 	prefix := "sso:mfa:{" + token + "}:"
 	return []string{prefix + "session", prefix + "lock", prefix + "attempts"}

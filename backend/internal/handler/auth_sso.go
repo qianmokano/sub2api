@@ -2,12 +2,9 @@ package handler
 
 import (
 	"context"
-	"fmt"
-	"net/url"
-	"strings"
 
-	"github.com/Wei-Shaw/sub2api/internal/pkg/casdoor"
-	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/casdoorcaptcha"
+
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ip"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -17,10 +14,32 @@ import (
 // SetSSOService attaches the provider without changing the existing handler constructor.
 func (h *AuthHandler) SetSSOService(sso *service.SSOService) { h.ssoService = sso }
 
+func (h *AuthHandler) SSOCaptcha(c *gin.Context) {
+	var req struct {
+		Action  string `json:"action" binding:"required,oneof=login register-send-code register"`
+		Account string `json:"account" binding:"required,max=255"`
+	}
+	if c.ShouldBindJSON(&req) != nil {
+		response.BadRequest(c, "Check the verification fields")
+		return
+	}
+	if h.ssoService == nil {
+		response.ErrorFrom(c, service.ErrSSODisabled)
+		return
+	}
+	challenge, err := h.ssoService.PrepareCaptcha(c.Request.Context(), req.Action, req.Account)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, challenge)
+}
+
 type ssoCaptchaRequest struct {
-	TurnstileToken        string `json:"turnstile_token"`
-	TencentCaptchaTicket  string `json:"tencent_captcha_ticket"`
-	TencentCaptchaRandstr string `json:"tencent_captcha_randstr"`
+	Captcha               *casdoorcaptcha.Proof `json:"captcha,omitempty"`
+	TurnstileToken        string                `json:"turnstile_token"`
+	TencentCaptchaTicket  string                `json:"tencent_captcha_ticket"`
+	TencentCaptchaRandstr string                `json:"tencent_captcha_randstr"`
 }
 
 func (h *AuthHandler) verifySSOCaptcha(c *gin.Context, req ssoCaptchaRequest) bool {
@@ -48,7 +67,7 @@ func (h *AuthHandler) SSOPasswordLogin(c *gin.Context) {
 	if !h.verifySSOCaptcha(c, req.ssoCaptchaRequest) {
 		return
 	}
-	result, err := h.ssoService.Login(c.Request.Context(), req.Account, req.Password)
+	result, err := h.ssoService.Login(c.Request.Context(), req.Account, req.Password, req.Captcha)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -98,7 +117,7 @@ func (h *AuthHandler) SSOSendCode(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
-	if err := h.ssoService.SendCode(c.Request.Context(), req.Email); err != nil {
+	if err := h.ssoService.SendCode(c.Request.Context(), req.Email, req.Captcha); err != nil {
 		response.ErrorFrom(c, err)
 		return
 	}
@@ -124,7 +143,7 @@ func (h *AuthHandler) SSORegister(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
-	user, err := h.ssoService.Register(c.Request.Context(), req.Email, req.Password, req.Code, req.DisplayName)
+	user, err := h.ssoService.Register(c.Request.Context(), req.Email, req.Password, req.Code, req.DisplayName, req.Captcha)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -158,74 +177,10 @@ func (h *AuthHandler) finishSSOLogin(c *gin.Context, user *service.User) {
 	h.respondWithTokenPair(c, user)
 }
 
-// OIDC and password authentication share the authoritative subject resolver and local MFA gate.
-func (h *AuthHandler) trySSOOIDCCallback(c *gin.Context, frontend, redirect, intent, issuer string, identity *casdoor.Identity) bool {
-	if h.settingSvc == nil {
-		return false
-	}
-	policy, err := h.settingSvc.GetSSOSettings(c.Request.Context())
-	if err != nil {
-		redirectOAuthError(c, frontend, "login_blocked", infraerrors.Reason(err), infraerrors.Message(err))
-		return true
-	}
-	if !policy.Enabled && !policy.OnlyEnabled {
-		return false
-	}
-	if intent != oauthIntentLogin {
-		if !policy.OnlyEnabled {
-			return false
-		}
-		err = service.ErrSSOOnly
-	} else if !policy.Enabled || strings.TrimRight(issuer, "/") != policy.Config.Issuer {
-		err = service.ErrSSODisabled
-	}
-	var user *service.User
-	if err == nil {
-		user, err = h.authService.ResolveSSOIdentity(c.Request.Context(), policy.Config.Issuer, identity)
-	}
-	if err == nil {
-		err = ensureLoginUserActive(user)
-	}
-	if err == nil {
-		err = h.ensureBackendModeAllowsUser(c.Request.Context(), user)
-	}
-	if err != nil {
-		redirectOAuthError(c, frontend, "login_blocked", infraerrors.Reason(err), infraerrors.Message(err))
-		return true
-	}
-	clearOAuthPendingSessionCookie(c, isRequestHTTPS(c))
-	clearOAuthPendingBrowserCookie(c, isRequestHTTPS(c))
-	fragment := url.Values{"redirect": {redirect}}
-	if user.TotpEnabled {
-		if h.totpService == nil {
-			redirectOAuthError(c, frontend, "login_blocked", "MFA_UNAVAILABLE", "Verification is temporarily unavailable")
-			return true
-		}
-		token, err := h.totpService.CreateSSOLoginSession(c.Request.Context(), user.ID, user.Email)
-		if err != nil {
-			redirectOAuthError(c, frontend, "login_blocked", "MFA_UNAVAILABLE", "Verification is temporarily unavailable")
-			return true
-		}
-		fragment.Set("sso_totp_token", token)
-		fragment.Set("email_masked", service.MaskEmail(user.Email))
-		redirectWithFragment(c, "/login", fragment)
-		return true
-	}
-	pair, err := h.authService.GenerateTokenPair(c.Request.Context(), user, "")
-	if err != nil {
-		redirectOAuthError(c, frontend, "login_blocked", "TOKEN_UNAVAILABLE", "Sign-in is temporarily unavailable")
-		return true
-	}
-	h.authService.RecordSuccessfulLogin(c.Request.Context(), user.ID)
-	fragment.Set("access_token", pair.AccessToken)
-	fragment.Set("refresh_token", pair.RefreshToken)
-	fragment.Set("expires_in", fmt.Sprint(pair.ExpiresIn))
-	fragment.Set("token_type", "Bearer")
-	redirectWithFragment(c, frontend, fragment)
-	return true
-}
-
 func (h *AuthHandler) checkLocalLoginPolicy(ctx context.Context, user *service.User, ssoAuthenticated bool) error {
+	if user != nil && user.IsAdmin() {
+		return nil
+	}
 	if h.settingSvc == nil {
 		return nil
 	}

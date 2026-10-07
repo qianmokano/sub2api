@@ -30,7 +30,6 @@ export type OAuthLoginProvider =
   | 'linuxdo'
   | 'dingtalk'
   | 'wechat'
-  | 'oidc'
 
 export interface OAuthLoginStart {
   provider: OAuthLoginProvider
@@ -591,19 +590,6 @@ export async function completeLinuxDoOAuthRegistration(
   return createPendingLinuxDoOAuthAccount(invitationCode, decision, affiliateCode)
 }
 
-/**
- * Complete OIDC OAuth registration by supplying an invitation code
- * @param invitationCode - Invitation code entered by the user
- * @returns Token pair on success
- */
-export async function completeOIDCOAuthRegistration(
-  invitationCode: string,
-  decision?: OAuthAdoptionDecision,
-  affiliateCode?: string
-): Promise<OAuthTokenResponse> {
-  return createPendingOIDCOAuthAccount(invitationCode, decision, affiliateCode)
-}
-
 export async function completeWeChatOAuthRegistration(
   invitationCode: string,
   decision?: OAuthAdoptionDecision,
@@ -613,7 +599,7 @@ export async function completeWeChatOAuthRegistration(
 }
 
 async function createPendingOAuthAccount(
-  provider: 'linuxdo' | 'oidc' | 'wechat' | 'dingtalk',
+  provider: 'linuxdo' | 'wechat' | 'dingtalk',
   invitationCode: string,
   decision?: OAuthAdoptionDecision,
   affiliateCode?: string
@@ -636,14 +622,6 @@ export async function createPendingLinuxDoOAuthAccount(
   affiliateCode?: string
 ): Promise<PendingOAuthCreateAccountResponse> {
   return createPendingOAuthAccount('linuxdo', invitationCode, decision, affiliateCode)
-}
-
-export async function createPendingOIDCOAuthAccount(
-  invitationCode: string,
-  decision?: OAuthAdoptionDecision,
-  affiliateCode?: string
-): Promise<PendingOAuthCreateAccountResponse> {
-  return createPendingOAuthAccount('oidc', invitationCode, decision, affiliateCode)
 }
 
 export async function createPendingWeChatOAuthAccount(
@@ -707,11 +685,9 @@ export const authAPI = {
   hasPendingOAuthSuggestedProfile,
   completePendingOAuthBindLogin,
   createPendingLinuxDoOAuthAccount,
-  createPendingOIDCOAuthAccount,
   createPendingWeChatOAuthAccount,
   exchangePendingOAuthCompletion,
   completeLinuxDoOAuthRegistration,
-  completeOIDCOAuthRegistration,
   completeWeChatOAuthRegistration,
   createPendingDingTalkOAuthAccount
 }

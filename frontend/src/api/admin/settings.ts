@@ -401,6 +401,7 @@ export interface SystemSettings {
   sso_enabled?: boolean;
   sso_only_enabled?: boolean;
   sso_registration_enabled?: boolean;
+  sso_issuer_url?: string;
   sso_organization?: string;
   sso_application?: string;
   sso_admin_url?: string;
@@ -565,29 +566,7 @@ export interface SystemSettings {
   wechat_connect_redirect_url: string;
   wechat_connect_frontend_redirect_url: string;
 
-  // Generic OIDC OAuth settings
-  oidc_connect_enabled: boolean;
-  oidc_connect_provider_name: string;
-  oidc_connect_client_id: string;
-  oidc_connect_client_secret_configured: boolean;
-  oidc_connect_issuer_url: string;
-  oidc_connect_discovery_url: string;
-  oidc_connect_authorize_url: string;
-  oidc_connect_token_url: string;
-  oidc_connect_userinfo_url: string;
-  oidc_connect_jwks_url: string;
-  oidc_connect_scopes: string;
-  oidc_connect_redirect_url: string;
-  oidc_connect_frontend_redirect_url: string;
-  oidc_connect_token_auth_method: string;
-  oidc_connect_use_pkce: boolean;
-  oidc_connect_validate_id_token: boolean;
-  oidc_connect_allowed_signing_algs: string;
-  oidc_connect_clock_skew_seconds: number;
-  oidc_connect_require_email_verified: boolean;
-  oidc_connect_userinfo_email_path: string;
-  oidc_connect_userinfo_id_path: string;
-  oidc_connect_userinfo_username_path: string;
+  // In-page Passport authentication
   github_oauth_enabled: boolean;
   github_oauth_client_id: string;
   github_oauth_client_secret_configured: boolean;
@@ -764,6 +743,7 @@ export interface UpdateSettingsRequest {
   sso_enabled?: boolean;
   sso_only_enabled?: boolean;
   sso_registration_enabled?: boolean;
+  sso_issuer_url?: string;
   sso_organization?: string;
   sso_application?: string;
   email_verify_enabled?: boolean;
@@ -910,28 +890,6 @@ export interface UpdateSettingsRequest {
   wechat_connect_scopes?: string;
   wechat_connect_redirect_url?: string;
   wechat_connect_frontend_redirect_url?: string;
-  oidc_connect_enabled?: boolean;
-  oidc_connect_provider_name?: string;
-  oidc_connect_client_id?: string;
-  oidc_connect_client_secret?: string;
-  oidc_connect_issuer_url?: string;
-  oidc_connect_discovery_url?: string;
-  oidc_connect_authorize_url?: string;
-  oidc_connect_token_url?: string;
-  oidc_connect_userinfo_url?: string;
-  oidc_connect_jwks_url?: string;
-  oidc_connect_scopes?: string;
-  oidc_connect_redirect_url?: string;
-  oidc_connect_frontend_redirect_url?: string;
-  oidc_connect_token_auth_method?: string;
-  oidc_connect_use_pkce?: boolean;
-  oidc_connect_validate_id_token?: boolean;
-  oidc_connect_allowed_signing_algs?: string;
-  oidc_connect_clock_skew_seconds?: number;
-  oidc_connect_require_email_verified?: boolean;
-  oidc_connect_userinfo_email_path?: string;
-  oidc_connect_userinfo_id_path?: string;
-  oidc_connect_userinfo_username_path?: string;
   github_oauth_enabled?: boolean;
   github_oauth_client_id?: string;
   github_oauth_client_secret?: string;

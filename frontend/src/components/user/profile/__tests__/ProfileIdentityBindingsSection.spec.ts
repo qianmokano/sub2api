@@ -147,9 +147,7 @@ describe('ProfileIdentityBindingsSection', () => {
     expect(wrapper.get('[data-testid="profile-binding-email-status"]').text()).toBe('Bound')
     expect(wrapper.get('[data-testid="profile-binding-linuxdo-status"]').text()).toBe('Bound')
     expect(wrapper.get('[data-testid="profile-binding-oidc-status"]').text()).toBe('Not bound')
-    expect(wrapper.get('[data-testid="profile-binding-oidc-action"]').text()).toBe(
-      'Bind ExampleID'
-    )
+    expect(wrapper.find('[data-testid="profile-binding-oidc-action"]').exists()).toBe(false)
     expect(wrapper.get('[data-testid="profile-binding-wechat-action"]').text()).toBe('Bind WeChat')
   })
 

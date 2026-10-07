@@ -2,7 +2,6 @@ import { mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import LinuxDoOAuthSection from '@/components/auth/LinuxDoOAuthSection.vue'
 import DingTalkOAuthSection from '@/components/auth/DingTalkOAuthSection.vue'
-import OidcOAuthSection from '@/components/auth/OidcOAuthSection.vue'
 
 const routeState = vi.hoisted(() => ({
   query: {} as Record<string, unknown>
@@ -27,7 +26,6 @@ describe('OAuth login sections', () => {
   it.each([
     ['linuxdo', LinuxDoOAuthSection],
     ['dingtalk', DingTalkOAuthSection],
-    ['oidc', OidcOAuthSection]
   ] as const)('emits a %s start request from the original button', async (provider, component) => {
     const originalHref = window.location.href
     const wrapper = mount(component, { props: { affCode: 'AFF456' } })

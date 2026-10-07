@@ -321,6 +321,9 @@ func (s *AuthPendingIdentityService) GetBrowserSession(ctx context.Context, sess
 	if err := validatePendingSessionState(session, browserSessionKey, ErrPendingAuthSessionExpired, ErrPendingAuthSessionConsumed); err != nil {
 		return nil, err
 	}
+	if strings.EqualFold(strings.TrimSpace(session.ProviderType), "oidc") {
+		return nil, ErrPendingAuthSessionNotFound
+	}
 	return session, nil
 }
 
