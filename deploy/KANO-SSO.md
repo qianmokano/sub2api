@@ -31,7 +31,7 @@
 ## 发布与部署
 
 1. 功能分支提交并推送，创建 PR；全部 CI 通过后合并到 fork `main`。
-2. 从该 main 提交创建未使用的 `vX.Y.Z-kano.N` 标签。标签触发 `Publish kano image`，再次测试后发布 `ghcr.io/qianmokano/sub2api:<标签>` 的 amd64/arm64 镜像和 release digest。禁止移动已发布标签，不发布 floating latest。
+2. 从该 main 提交创建未使用的 `vX.Y.Z-N` 标签，`X.Y.Z` 是对应上游稳定版本，`N` 是从 1 开始的 fork 发布序号。例如 `v0.2.14-1`，同一上游版本后续为 `v0.2.14-2`；升级上游后从 `v0.2.15-1` 开始。标签触发 `Publish kano image`，再次测试后发布 `ghcr.io/qianmokano/sub2api:<标签>` 的 amd64/arm64 镜像和 release digest。禁止移动已发布标签，不发布 floating latest。旧 `vX.Y.Z-kano.N` 标签及镜像保留原名。
 3. 生产 Compose 位于 `/opt/sub2api-deploy`，应用绑定 `127.0.0.1:8081`。先记录实际旧 image digest、容器挂载和健康状态；拉取新镜像成功后再进入停机窗口。
 4. 停止应用写入，备份部署 `.env`、Compose、应用 `data`、PostgreSQL custom-format dump 与 Redis RDB/数据目录，设置仅管理员可读权限。数据库使用 `pg_dump`，不复制运行中数据库目录替代可恢复备份。Redis 使用 `SAVE` 完成快照再备份，按需停止 Redis 后复制目录。
 5. 在同一 PostgreSQL 服务创建临时数据库，使用 `pg_restore --exit-on-error` 恢复备份并比对关键表计数，再删除临时数据库。恢复验证失败时保持旧镜像，不切换。
@@ -47,6 +47,6 @@
 1. `git fetch upstream --tags`；从 fork main 新建 `kano/upstream-vX.Y.Z`，检查目标稳定版本与安全记录。
 2. `git merge vX.Y.Z`，保留 kano 定制提交，不 rebase 已发布历史，不强推 main。
 3. 重点审查 Casdoor 适配、认证路由与策略、旧 OIDC 入口拒绝、本地 TOTP session、身份绑定事务、设置 DTO、认证 Store 和数据库迁移。
-4. 运行完整 CI、统一认证回归与存量数据验收；PR 合并后发布对应上游版本的新 `vX.Y.Z-kano.N` 镜像，按同一备份和回退流程部署。
+4. 运行完整 CI、统一认证回归与存量数据验收；PR 合并后发布对应上游版本的新 `vX.Y.Z-N` 镜像，按同一备份和回退流程部署。
 
 定制主要集中在 `internal/pkg/casdoor`、`service/*sso*`、`handler/auth_sso.go`、`server/middleware/sso_guard.go` 与前端必要接线。fork 构建使用 `kano-container`；后端拒绝从上游下载替换程序，后台隐藏该更新入口。保留上游 release 工作流供以后合并，但其 prepare job 只在上游仓库执行；fork 使用独立 GHCR 工作流。

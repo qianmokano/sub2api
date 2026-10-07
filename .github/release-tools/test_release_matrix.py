@@ -1,4 +1,5 @@
 import argparse
+import fnmatch
 import hashlib
 import importlib.util
 import io
@@ -185,6 +186,42 @@ class ReleaseMatrixTest(unittest.TestCase):
                     self.assertIn('fixturehub/sub2api:9.8', log)
                     self.assertIn('ghcr.io/exampleowner/sub2api:9', log)
 
+
+
+class KanoReleaseWorkflowTest(unittest.TestCase):
+    def setUp(self):
+        self.workflow = yaml.load(
+            (ROOT / '.github/workflows/publish-kano-image.yml').read_text(), Loader=yaml.BaseLoader)
+
+    def test_new_release_tags_trigger_and_pass_validation(self):
+        patterns = self.workflow['on']['push']['tags']
+        steps = self.workflow['jobs']['verify']['steps']
+        guard = next(step for step in steps if step.get('name') == 'Verify release tag format')
+        self.assertEqual(guard['env']['RELEASE_TAG'], '${{ github.ref_name }}')
+        for tag in ('v0.2.14-1', 'v0.2.14-2', 'v0.2.15-1', 'v10.20.30-123'):
+            with self.subTest(tag=tag):
+                self.assertTrue(any(fnmatch.fnmatchcase(tag, pattern) for pattern in patterns))
+                result = subprocess.run(['bash', '-c', guard['run']],
+                                        env={**os.environ, 'RELEASE_TAG': tag}, capture_output=True)
+                self.assertEqual(result.returncode, 0, result.stderr.decode())
+        for tag in ('v0.2.14', 'v0.2.14-kano.1', 'v0.2.14-rc1', 'v0.2.14-0',
+                    'v0.2.14-01', 'v0.2.14-1-extra', 'vv0.2.14-1', '0.2.14-1'):
+            with self.subTest(tag=tag):
+                result = subprocess.run(['bash', '-c', guard['run']],
+                                        env={**os.environ, 'RELEASE_TAG': tag}, capture_output=True)
+                self.assertNotEqual(result.returncode, 0)
+        for tag in ('v0.2.14', 'v0.2.14-kano.1', 'v0.2.14-rc1'):
+            self.assertFalse(any(fnmatch.fnmatchcase(tag, pattern) for pattern in patterns))
+
+    def test_publication_preserves_fork_image_and_update_guard(self):
+        publish = self.workflow['jobs']['publish']
+        self.assertEqual(publish['needs'], 'verify')
+        build = next(step['with'] for step in publish['steps']
+                     if step.get('uses') == 'docker/build-push-action@v6')
+        self.assertEqual(build['tags'], 'ghcr.io/qianmokano/sub2api:${{ github.ref_name }}')
+        self.assertEqual(build['platforms'], 'linux/amd64,linux/arm64')
+        self.assertIn('VERSION=${{ github.ref_name }}', build['build-args'])
+        self.assertIn('BUILD_TYPE=kano-container', build['build-args'])
 
 
 if __name__ == '__main__':

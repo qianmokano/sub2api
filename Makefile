@@ -4,6 +4,8 @@ FRONTEND_CRITICAL_VITEST := \
 	src/views/auth/__tests__/LoginView.spec.ts \
 	src/views/auth/__tests__/RegisterView.spec.ts \
 	src/stores/__tests__/auth.sso.spec.ts \
+	src/utils/__tests__/version.spec.ts \
+	src/components/common/__tests__/VersionBadge.spec.ts \
 	src/i18n/__tests__/localeKeyCompleteness.spec.ts \
 	src/api/__tests__/client.spec.ts \
 	src/api/__tests__/tokenRefresh.spec.ts \
