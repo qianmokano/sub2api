@@ -12,6 +12,7 @@ import (
 	"testing"
 	"testing/fstest"
 	"time"
+	"unicode"
 
 	"github.com/Wei-Shaw/sub2api/migrations"
 	"github.com/stretchr/testify/require"
@@ -26,7 +27,8 @@ func upgradeMigrationFS(t *testing.T, through int) fstest.MapFS {
 	for _, name := range names {
 		prefix, _, ok := strings.Cut(name, "_")
 		require.True(t, ok, name)
-		version, err := strconv.Atoi(prefix)
+		// Historical migrations may suffix the numeric prefix, for example 006b.
+		version, err := strconv.Atoi(strings.TrimRightFunc(prefix, unicode.IsLetter))
 		require.NoError(t, err, name)
 		if version > through {
 			continue
