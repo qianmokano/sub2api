@@ -106,7 +106,13 @@ jobs:
       - name: Updater race tests and coverage
         working-directory: backend
         run: |
-          go test -race -tags=unit -coverpkg=./internal/kanoagent,./internal/kanoupdate -coverprofile="$RUNNER_TEMP/kano.cover" ./internal/kanoagent ./internal/kanoupdate ./cmd/kano-updater
+          go test -race -tags=unit -coverpkg=./internal/kanoagent,./internal/kanoupdate,./cmd/kano-updater -coverprofile="$RUNNER_TEMP/kano-user.cover" ./internal/kanoagent ./internal/kanoupdate ./cmd/kano-updater
+          # Privilege rejection is checked above as runner. Native daemon/CLI
+          # lifecycle tests also run as root with isolated temporary files and
+          # mocked IPC; no Docker, deployment or release API is used by them.
+          cp -a "$(go env GOCACHE)" "$RUNNER_TEMP/kano-root-go-cache"
+          sudo env "GOCACHE=$RUNNER_TEMP/kano-root-go-cache" "GOMODCACHE=$(go env GOMODCACHE)" "$(command -v go)" test -count=1 -race -tags=unit -coverpkg=./internal/kanoagent,./internal/kanoupdate,./cmd/kano-updater -coverprofile="$RUNNER_TEMP/kano-root.cover" ./cmd/kano-updater
+          awk 'FNR==1 { if (NR==1) print; next } { key=$1 " " $2; count[key]+=$3 } END { for (key in count) print key, count[key] }' "$RUNNER_TEMP/kano-user.cover" "$RUNNER_TEMP/kano-root.cover" > "$RUNNER_TEMP/kano.cover"
           go tool cover -func="$RUNNER_TEMP/kano.cover" | awk '/^total:/ { if ($3+0 < 80) exit 1; found=1 } END { if (!found) exit 1 }'
           if go list -deps ./cmd/server | grep -q '/internal/kanoagent$'; then
             echo 'Application must not import the privileged host executor.' >&2
