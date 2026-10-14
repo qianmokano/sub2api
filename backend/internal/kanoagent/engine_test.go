@@ -331,6 +331,65 @@ func TestExecuteResumesDurableInterruptedRecovery(t *testing.T) {
 	require.Equal(t, "sub2api-original-data", string(body))
 }
 
+func TestExecuteKeepsFailureDiagnosticsPrivate(t *testing.T) {
+	for _, fault := range []string{"disk", "checkpoint", "release"} {
+		t.Run(fault, func(t *testing.T) {
+			e, store, job, f := newDeploymentFixture(t, fault)
+			if fault == "checkpoint" {
+				job.State = json.RawMessage(`invalid checkpoint`)
+			}
+			if fault == "release" {
+				source, ok := e.Source.(*fakeSource)
+				require.True(t, ok)
+				source.err = errors.New("private upstream detail: original-secret")
+			}
+			failure := e.Execute(context.Background(), store, job)
+			require.Error(t, failure)
+			path := filepath.Join(e.Config.StateDir, "diagnostics", "operation-"+job.ID+".json")
+			body, err := os.ReadFile(path)
+			require.NoError(t, err)
+			var diagnostic struct {
+				OperationID string `json:"operation_id"`
+				Version     string `json:"version"`
+				Error       string `json:"error"`
+			}
+			require.NoError(t, json.Unmarshal(body, &diagnostic))
+			require.Equal(t, job.ID, diagnostic.OperationID)
+			require.Equal(t, job.TargetVersion, diagnostic.Version)
+			require.Equal(t, failure.Error(), diagnostic.Error)
+			for _, item := range []struct {
+				path string
+				mode os.FileMode
+			}{{path, 0o600}, {filepath.Dir(path), 0o700}} {
+				info, statErr := os.Stat(item.path)
+				require.NoError(t, statErr)
+				require.Equal(t, item.mode, info.Mode().Perm())
+			}
+			latest, err := store.Get(context.Background(), job.ID)
+			require.NoError(t, err)
+			public, err := json.Marshal(latest)
+			require.NoError(t, err)
+			require.NotContains(t, string(public), failure.Error())
+			require.NotContains(t, string(public), "original-secret")
+			require.True(t, f.containers["sub2api"].State.Running)
+			require.NoFileExists(t, e.Config.MaintenanceFile)
+		})
+	}
+}
+
+func TestExecuteDiagnosticWriteFailurePreservesOriginalFailure(t *testing.T) {
+	e, store, job, _ := newDeploymentFixture(t, "image")
+	path := filepath.Join(e.Config.StateDir, "diagnostics")
+	require.NoError(t, os.WriteFile(path, []byte("existing protected file"), 0o600))
+	require.EqualError(t, e.Execute(context.Background(), store, job), "image unavailable")
+	body, err := os.ReadFile(path)
+	require.NoError(t, err)
+	require.Equal(t, "existing protected file", string(body))
+	latest, err := store.Get(context.Background(), job.ID)
+	require.NoError(t, err)
+	require.Equal(t, Failed, latest.Status)
+}
+
 func TestCommittedRecoveryNeverRestoresOlderDatabase(t *testing.T) {
 	e, store, job, _ := newDeploymentFixture(t, "")
 	require.NoError(t, e.Execute(context.Background(), store, job))
