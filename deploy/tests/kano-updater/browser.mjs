@@ -75,6 +75,7 @@ try {
   })
   assert.equal(await button.isEnabled(), true)
   await page.screenshot({ path: path.join(artifacts, 'upgrade-button.png'), fullPage: true })
+  assert.equal((await context.request.get(`${origin}/fixture/baseline`, { timeout: 120_000 })).status(), 200)
   // Capture the real response before handing it to the page: the application
   // immediately navigates away and Chromium can discard its response body.
   let accepted

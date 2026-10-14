@@ -560,10 +560,31 @@ func TestKanoUpdaterDockerBrowser(t *testing.T) {
 	adminToken := fixtureAdminSession(t, engine)
 	before, key := seedDockerData(t, engine)
 	finished := make(chan bool, 1)
+	baseline := make(chan DatabaseSnapshot, 1)
 	fixture := &http.Server{Addr: "127.0.0.1:19085", ReadHeaderTimeout: 5 * time.Second, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/ready":
 			writeJSON(w, 200, map[string]bool{"ready": true})
+		case r.Method == http.MethodGet && r.URL.Path == "/baseline":
+			// Browser login updates users' login/activity timestamps and accepting
+			// the existing declaration writes settings. Capture after those normal
+			// setup actions, immediately before clicking the real upgrade button.
+			postgres, captureErr := engine.container(r.Context(), "postgres")
+			if captureErr != nil {
+				w.WriteHeader(500)
+				return
+			}
+			captured, captureErr := engine.database(r.Context(), postgres, nil)
+			if captureErr != nil {
+				w.WriteHeader(500)
+				return
+			}
+			select {
+			case baseline <- captured:
+				writeJSON(w, 200, map[string]bool{"captured": true})
+			default:
+				w.WriteHeader(409)
+			}
 		case r.Method == http.MethodPost && r.URL.Path == "/done":
 			select {
 			case finished <- r.URL.Query().Get("ok") == "true":
@@ -588,6 +609,11 @@ func TestKanoUpdaterDockerBrowser(t *testing.T) {
 	case <-time.After(10 * time.Minute):
 		t.Fatal("external HTTPS browser test did not finish")
 	}
+	select {
+	case before = <-baseline:
+	default:
+		t.Fatal("browser did not capture its pre-upgrade data baseline")
+	}
 	store, err := OpenStore(config.StateDir)
 	require.NoError(t, err)
 	defer func() { _ = store.Close() }()
@@ -595,15 +621,31 @@ func TestKanoUpdaterDockerBrowser(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, Succeeded, final.Status)
 	require.Equal(t, "admin:1", final.Actor)
-	postgres, err := engine.container(context.Background(), "postgres")
-	require.NoError(t, err)
-	after, err := engine.database(context.Background(), postgres, &before)
-	require.NoError(t, err)
-	require.NoError(t, CompareDatabase(before, after, integrationManifest(t), false))
-	require.NoError(t, engine.billing(context.Background(), key))
-	verifyFixtureAdminSession(t, engine, adminToken)
 	var state UpgradeState
 	require.NoError(t, json.Unmarshal(final.State, &state))
+	require.NotNil(t, state.Snapshot)
+	postgres, err := engine.container(context.Background(), "postgres")
+	require.NoError(t, err)
+	// The real POST itself creates one audit entry before traffic is frozen.
+	// Account for that expected write, then independently compare every frozen
+	// business value (including the complete audit history) after the UI returns.
+	for table, original := range before.Tables {
+		frozen := state.Snapshot.Database.Tables[table]
+		if original.Count != frozen.Count || original.Digest != frozen.Digest {
+			t.Logf("pre-click to stopped-write changes: %s (%d -> %d rows)", table, original.Count, frozen.Count)
+		}
+	}
+	require.Equal(t, before.Tables["audit_logs"].Count+1, state.Snapshot.Database.Tables["audit_logs"].Count)
+	before.Tables["audit_logs"] = state.Snapshot.Database.Tables["audit_logs"]
+	require.NoError(t, CompareDatabase(before, state.Snapshot.Database, integrationManifest(t), false))
+	audit, err := engine.pg(context.Background(), postgres, "SELECT COUNT(*) FROM audit_logs WHERE actor_user_id=1 AND method='POST' AND path='/api/v1/admin/system/update' AND status_code=202")
+	require.NoError(t, err)
+	require.Equal(t, "1", audit)
+	after, err := engine.database(context.Background(), postgres, &state.Snapshot.Database)
+	require.NoError(t, err)
+	require.NoError(t, CompareDatabase(state.Snapshot.Database, after, integrationManifest(t), false))
+	require.NoError(t, engine.billing(context.Background(), key))
+	verifyFixtureAdminSession(t, engine, adminToken)
 	require.NoError(t, engine.verifyBackup(&state))
 	t.Logf("browser-clicked upgrade preserved %d original tables and %d rows", len(before.Tables), databaseRowCount(before))
 }
