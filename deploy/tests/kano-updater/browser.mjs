@@ -61,6 +61,7 @@ try {
     localStorage.setItem('auth_user', JSON.stringify(session.user))
     localStorage.setItem('sub2api_locale', 'en')
     localStorage.setItem('kano-update-language', 'en')
+    localStorage.setItem(`admin_guide_${session.user.id}_admin_v4_interactive`, 'true')
   }, session)
   await page.goto(`${origin}/admin/dashboard`)
   await page.getByRole('button', { name: 'v0.2.16-1', exact: true }).first().click()
