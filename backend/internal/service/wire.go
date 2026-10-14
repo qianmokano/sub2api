@@ -108,7 +108,7 @@ func ProvideBatchImageModelPricingResolver(resolver *ModelPricingResolver) *Batc
 
 func ProvideBatchImageCleanupService(repo BatchImageRepository, accountRepo AccountRepository, cfg *config.Config) *BatchImageCleanupService {
 	svc := NewBatchImageCleanupService(repo, accountRepo, cfg)
-	svc.Start()
+	kanoupdate.StartBackground(svc.Start)
 	return svc
 }
 
@@ -148,7 +148,7 @@ func ProvideTokenRefreshService(
 	// 调用侧显式注入后台刷新策略，避免策略漂移
 	svc.SetRefreshPolicy(DefaultBackgroundRefreshPolicy())
 	svc.SetAccountRuntimeBlocker(runtimeBlocker)
-	svc.Start()
+	kanoupdate.StartBackground(svc.Start)
 	return svc
 }
 
@@ -222,7 +222,7 @@ func ProvideOpenAIQuotaAutoResetService(
 		settingService,
 		leaderLock,
 	)
-	service.Start()
+	kanoupdate.StartBackground(service.Start)
 	return service
 }
 
@@ -336,7 +336,7 @@ func ProvideCNProviderBalanceCheckService(
 		minutes = cfg.Gateway.CNProviders.BalanceCheckIntervalMinutes
 	}
 	svc := NewCNProviderBalanceCheckService(accountRepo, balanceService, quotaService, cfg, time.Duration(minutes)*time.Minute)
-	svc.Start()
+	kanoupdate.StartBackground(svc.Start)
 	return svc
 }
 
@@ -391,21 +391,21 @@ func ProvideDashboardAggregationService(repo DashboardAggregationRepository, tim
 	svc := NewDashboardAggregationService(repo, timingWheel, cfg)
 	svc.settingRepo = settingRepo
 	svc.SetLeaderLock(lockCache, db)
-	svc.Start()
+	kanoupdate.StartBackground(svc.Start)
 	return svc
 }
 
 // ProvideUsageCleanupService 创建并启动使用记录清理任务服务
 func ProvideUsageCleanupService(repo UsageCleanupRepository, timingWheel *TimingWheelService, dashboardAgg *DashboardAggregationService, cfg *config.Config) *UsageCleanupService {
 	svc := NewUsageCleanupService(repo, timingWheel, dashboardAgg, cfg)
-	svc.Start()
+	kanoupdate.StartBackground(svc.Start)
 	return svc
 }
 
 // ProvideAccountExpiryService creates and starts AccountExpiryService.
 func ProvideAccountExpiryService(accountRepo AccountRepository) *AccountExpiryService {
 	svc := NewAccountExpiryService(accountRepo, time.Minute)
-	svc.Start()
+	kanoupdate.StartBackground(svc.Start)
 	return svc
 }
 
@@ -417,7 +417,7 @@ func ProvideOpenAICodexVersionSyncService(
 	githubClient GitHubReleaseClient,
 ) *OpenAICodexVersionSyncService {
 	svc := NewOpenAICodexVersionSyncService(settingRepo, settingService, githubClient, openAICodexVersionSyncInterval)
-	svc.Start()
+	kanoupdate.StartBackground(svc.Start)
 	return svc
 }
 
@@ -429,14 +429,14 @@ func ProvideClaudeCodeVersionSyncService(
 	githubClient GitHubReleaseClient,
 ) *ClaudeCodeVersionSyncService {
 	svc := NewClaudeCodeVersionSyncService(settingRepo, settingService, githubClient, claudeCodeVersionSyncInterval)
-	svc.Start()
+	kanoupdate.StartBackground(svc.Start)
 	return svc
 }
 
 // ProvideProxyExpiryService creates and starts ProxyExpiryService.
 func ProvideProxyExpiryService(proxyRepo ProxyRepository) *ProxyExpiryService {
 	svc := NewProxyExpiryService(proxyRepo, time.Minute)
-	svc.Start()
+	kanoupdate.StartBackground(svc.Start)
 	return svc
 }
 
@@ -446,7 +446,7 @@ func ProvideSubscriptionExpiryService(userSubRepo UserSubscriptionRepository, se
 	svc.SetSettingRepository(settingRepo)
 	svc.SetNotificationEmailService(notificationEmailService)
 	svc.SetLeaderLock(lockCache, db)
-	svc.Start()
+	kanoupdate.StartBackground(svc.Start)
 	return svc
 }
 
@@ -456,14 +456,14 @@ func ProvideTimingWheelService() (*TimingWheelService, error) {
 	if err != nil {
 		return nil, err
 	}
-	svc.Start()
+	kanoupdate.StartBackground(svc.Start)
 	return svc, nil
 }
 
 // ProvideDeferredService creates and starts DeferredService
 func ProvideDeferredService(accountRepo AccountRepository, timingWheel *TimingWheelService) *DeferredService {
 	svc := NewDeferredService(accountRepo, timingWheel, 10*time.Second)
-	svc.Start()
+	kanoupdate.StartBackground(svc.Start)
 	return svc
 }
 
@@ -475,7 +475,7 @@ func ProvideConcurrencyService(cache ConcurrencyCache, accountRepo AccountReposi
 	}
 	if cfg != nil {
 		svc.SetAccountLoadBatchCacheTTL(time.Duration(cfg.Gateway.Scheduling.LoadBatchCacheTTLMS) * time.Millisecond)
-		svc.StartSlotCleanupWorker(accountRepo, cfg.Gateway.Scheduling.SlotCleanupInterval)
+		kanoupdate.StartBackground(func() { svc.StartSlotCleanupWorker(accountRepo, cfg.Gateway.Scheduling.SlotCleanupInterval) })
 	}
 	return svc
 }
@@ -484,7 +484,9 @@ func ProvideConcurrencyService(cache ConcurrencyCache, accountRepo AccountReposi
 func ProvideUserMessageQueueService(cache UserMsgQueueCache, rpmCache RPMCache, cfg *config.Config) *UserMessageQueueService {
 	svc := NewUserMessageQueueService(cache, rpmCache, &cfg.Gateway.UserMessageQueue)
 	if cfg.Gateway.UserMessageQueue.CleanupIntervalSeconds > 0 {
-		svc.StartCleanupWorker(time.Duration(cfg.Gateway.UserMessageQueue.CleanupIntervalSeconds) * time.Second)
+		kanoupdate.StartBackground(func() {
+			svc.StartCleanupWorker(time.Duration(cfg.Gateway.UserMessageQueue.CleanupIntervalSeconds) * time.Second)
+		})
 	}
 	return svc
 }
@@ -498,7 +500,7 @@ func ProvideSchedulerSnapshotService(
 	cfg *config.Config,
 ) *SchedulerSnapshotService {
 	svc := NewSchedulerSnapshotService(cache, outboxRepo, accountRepo, groupRepo, cfg)
-	svc.Start()
+	kanoupdate.StartBackground(svc.Start)
 	return svc
 }
 
@@ -538,7 +540,7 @@ func ProvideOpsMetricsCollector(
 	cfg *config.Config,
 ) *OpsMetricsCollector {
 	collector := NewOpsMetricsCollector(opsRepo, settingRepo, accountRepo, concurrencyService, db, redisClient, cfg)
-	collector.Start()
+	kanoupdate.StartBackground(collector.Start)
 	return collector
 }
 
@@ -551,7 +553,7 @@ func ProvideOpsAggregationService(
 	cfg *config.Config,
 ) *OpsAggregationService {
 	svc := NewOpsAggregationService(opsRepo, settingRepo, db, redisClient, cfg)
-	svc.Start()
+	kanoupdate.StartBackground(svc.Start)
 	return svc
 }
 
@@ -565,7 +567,7 @@ func ProvideOpsAlertEvaluatorService(
 	proxyRepo ProxyRepository,
 ) *OpsAlertEvaluatorService {
 	svc := NewOpsAlertEvaluatorService(opsService, opsRepo, emailService, redisClient, cfg, proxyRepo)
-	svc.Start()
+	kanoupdate.StartBackground(svc.Start)
 	return svc
 }
 
@@ -584,7 +586,7 @@ func ProvideOpsCleanupService(
 	opsService *OpsService,
 ) *OpsCleanupService {
 	svc := NewOpsCleanupService(opsRepo, db, redisClient, cfg, channelMonitorSvc, settingRepo)
-	svc.Start()
+	kanoupdate.StartBackground(svc.Start)
 	if opsService != nil {
 		opsService.SetCleanupReloader(svc)
 	}
@@ -593,7 +595,7 @@ func ProvideOpsCleanupService(
 
 func ProvideOpsSystemLogSink(opsRepo OpsRepository) *OpsSystemLogSink {
 	sink := NewOpsSystemLogSink(opsRepo)
-	sink.Start()
+	kanoupdate.StartBackground(sink.Start)
 	logger.SetSink(sink)
 	return sink
 }
@@ -602,7 +604,7 @@ func ProvideOpsSystemLogSink(opsRepo OpsRepository) *OpsSystemLogSink {
 // 停止逻辑挂在 cmd/server 的 provideCleanup。
 func ProvideAuditLogService(repo AuditLogRepository, settingService *SettingService) *AuditLogService {
 	svc := NewAuditLogService(repo, settingService)
-	svc.Start()
+	kanoupdate.StartBackground(svc.Start)
 	return svc
 }
 
@@ -641,14 +643,14 @@ func ProvideSystemOperationLockService(repo IdempotencyRepository, cfg *config.C
 
 func ProvideIdempotencyCleanupService(repo IdempotencyRepository, cfg *config.Config) *IdempotencyCleanupService {
 	svc := NewIdempotencyCleanupService(repo, cfg)
-	svc.Start()
+	kanoupdate.StartBackground(svc.Start)
 	return svc
 }
 
 // ProvideGeminiCachedContentService creates GeminiCachedContentService and starts its mutation recovery loop.
 func ProvideGeminiCachedContentService(repo GeminiCachedContentRepository, compat *GeminiMessagesCompatService, cfg *config.Config) *GeminiCachedContentService {
 	svc := NewGeminiCachedContentService(repo, compat, cfg)
-	svc.Start()
+	kanoupdate.StartBackground(svc.Start)
 	return svc
 }
 
@@ -669,7 +671,7 @@ func ProvideScheduledTestRunnerService(
 	cfg *config.Config,
 ) *ScheduledTestRunnerService {
 	svc := NewScheduledTestRunnerService(planRepo, scheduledSvc, accountTestSvc, rateLimitSvc, cfg)
-	svc.Start()
+	kanoupdate.StartBackground(svc.Start)
 	return svc
 }
 
@@ -682,14 +684,14 @@ func ProvideOpsScheduledReportService(
 	cfg *config.Config,
 ) *OpsScheduledReportService {
 	svc := NewOpsScheduledReportService(opsService, userService, emailService, redisClient, cfg)
-	svc.Start()
+	kanoupdate.StartBackground(svc.Start)
 	return svc
 }
 
 // ProvideAPIKeyAuthCacheInvalidator 提供 API Key 认证缓存失效能力
 func ProvideAPIKeyAuthCacheInvalidator(apiKeyService *APIKeyService) APIKeyAuthCacheInvalidator {
 	// Start Pub/Sub subscriber for L1 cache invalidation across instances
-	apiKeyService.StartAuthCacheInvalidationSubscriber(context.Background())
+	kanoupdate.StartBackground(func() { apiKeyService.StartAuthCacheInvalidationSubscriber(context.Background()) })
 	return apiKeyService
 }
 
@@ -734,7 +736,7 @@ func ProvideBackupService(
 ) *BackupService {
 	svc := NewBackupService(settingRepo, cfg, encryptor, storeFactory, dumper)
 	svc.SetLeaderLock(lockCache, db)
-	svc.Start()
+	kanoupdate.StartBackground(svc.Start)
 	return svc
 }
 
@@ -779,7 +781,7 @@ func ProvideOpsService(
 	}
 	svc.authCacheInvalidationWorker = authCacheInvalidationWorker
 	svc.apiKeyService = apiKeyService
-	svc.StartRuntimeSettingsRefresh(context.Background())
+	kanoupdate.StartBackground(func() { svc.StartRuntimeSettingsRefresh(context.Background()) })
 	return svc
 }
 
@@ -791,7 +793,7 @@ func ProvideOpsIngressRejectAggregator(opsRepo OpsRepository, opsService *OpsSer
 		return nil
 	}
 	aggregator := NewOpsIngressRejectAggregator(repo)
-	aggregator.Start()
+	kanoupdate.StartBackground(aggregator.Start)
 	opsService.SetIngressRejectAggregator(aggregator)
 	return aggregator
 }
@@ -1002,7 +1004,7 @@ var ProviderSet = wire.NewSet(
 // ProvideUserPlatformQuotaUsageFlusher 创建并启动 UserPlatformQuotaUsageFlusher。
 func ProvideUserPlatformQuotaUsageFlusher(cfg *config.Config, cache BillingCache, quotaRepo UserPlatformQuotaRepository, tw *TimingWheelService) *UserPlatformQuotaUsageFlusher {
 	svc := NewUserPlatformQuotaUsageFlusher(cfg, cache, quotaRepo, tw)
-	svc.Start()
+	kanoupdate.StartBackground(svc.Start)
 	return svc
 }
 
@@ -1030,7 +1032,7 @@ func ProvidePaymentService(entClient *dbent.Client, registry *payment.Registry, 
 func ProvidePaymentOrderExpiryService(paymentSvc *PaymentService, lockCache LeaderLockCache, db *sql.DB) *PaymentOrderExpiryService {
 	svc := NewPaymentOrderExpiryService(paymentSvc, 60*time.Second)
 	svc.SetLeaderLock(lockCache, db)
-	svc.Start()
+	kanoupdate.StartBackground(svc.Start)
 	return svc
 }
 
@@ -1066,7 +1068,7 @@ func ProvideChannelMonitorRunner(
 		svc.SetScheduler(r)
 		svc.SetQuotaFetcher(quotaFetcher)
 	}
-	r.Start()
+	kanoupdate.StartBackground(r.Start)
 	return r
 }
 
@@ -1086,7 +1088,7 @@ func ProvideChannelMonitorV2Aggregator(repo ChannelMonitorV2Repository, db *sql.
 	if os.Getenv("CHANNEL_MONITOR_V2_DISABLE_AGGREGATOR") == "1" {
 		return aggregator
 	}
-	aggregator.Start()
+	kanoupdate.StartBackground(aggregator.Start)
 	return aggregator
 }
 
