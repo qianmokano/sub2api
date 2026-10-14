@@ -1,6 +1,6 @@
 //go:build unit
 
-package kanoupdate
+package kanoagent
 
 import (
 	"bytes"

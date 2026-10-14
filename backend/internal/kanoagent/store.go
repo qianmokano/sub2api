@@ -1,4 +1,4 @@
-package kanoupdate
+package kanoagent
 
 import (
 	"context"
@@ -15,56 +15,16 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/kanoupdate"
 	"golang.org/x/sys/unix"
 	_ "modernc.org/sqlite"
 )
-
-type Status string
-
-const (
-	Queued           Status = "queued"
-	Pulling          Status = "pulling"
-	Preflight        Status = "preflight"
-	BackingUp        Status = "backing_up"
-	Restoring        Status = "restoring"
-	Verifying        Status = "verifying"
-	Switching        Status = "switching"
-	Checking         Status = "checking"
-	RollingBack      Status = "rolling_back"
-	Succeeded        Status = "succeeded"
-	Failed           Status = "failed"
-	FailedRolledBack Status = "failed_rolled_back"
-	NeedsAttention   Status = "needs_attention"
-)
-
-func (s Status) Active() bool { return s != Succeeded && s != Failed && s != FailedRolledBack }
 
 var (
 	ErrBusy                = errors.New("another container upgrade needs to finish first")
 	ErrIdempotencyConflict = errors.New("idempotency key was already used with a different update request")
 	ErrNotFound            = errors.New("update job not found")
 )
-
-type StartRequest struct {
-	Version        string `json:"version"`
-	ExpectedDigest string `json:"expected_digest"`
-	IdempotencyKey string `json:"idempotency_key"`
-	Actor          string `json:"actor"`
-}
-
-type Job struct {
-	ID            string          `json:"operation_id"`
-	SourceVersion string          `json:"source_version"`
-	TargetVersion string          `json:"target_version"`
-	ImageDigest   string          `json:"image_digest"`
-	Status        Status          `json:"status"`
-	Message       string          `json:"message"`
-	CreatedAt     time.Time       `json:"created_at"`
-	UpdatedAt     time.Time       `json:"updated_at"`
-	BackupID      string          `json:"backup_id,omitempty"`
-	Manifest      Manifest        `json:"-"`
-	State         json.RawMessage `json:"-"`
-}
 
 type Store struct {
 	db *sql.DB
@@ -95,7 +55,7 @@ func OpenStore(directory string) (*Store, error) {
 		return nil, err
 	}
 	u := url.URL{Scheme: "file", Path: filename}
-	db, err := sql.Open("sqlite", u.String()+"?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)")
+	db, err := sql.Open("sqlite", u.String()+"?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=synchronous(FULL)&_pragma=foreign_keys(1)")
 	if err != nil {
 		return nil, err
 	}
@@ -104,12 +64,15 @@ func OpenStore(directory string) (*Store, error) {
 		id TEXT PRIMARY KEY, request_key TEXT UNIQUE NOT NULL, fingerprint TEXT NOT NULL,
 		source_version TEXT NOT NULL, target_version TEXT NOT NULL, image_digest TEXT NOT NULL,
 		status TEXT NOT NULL, message TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
-		backup_id TEXT NOT NULL DEFAULT '', manifest TEXT NOT NULL, state TEXT NOT NULL DEFAULT '{}'
+		backup_id TEXT NOT NULL DEFAULT '', manifest TEXT NOT NULL, state TEXT NOT NULL DEFAULT '{}', actor TEXT NOT NULL
 	);
 	CREATE UNIQUE INDEX IF NOT EXISTS jobs_one_active ON jobs((1))
 		WHERE status NOT IN ('succeeded','failed','failed_rolled_back');
 	CREATE TABLE IF NOT EXISTS capabilities (
 		token_hash TEXT PRIMARY KEY, job_id TEXT NOT NULL REFERENCES jobs(id), expires_at INTEGER NOT NULL
+	);
+	CREATE TABLE IF NOT EXISTS job_steps (
+		id INTEGER PRIMARY KEY, job_id TEXT NOT NULL REFERENCES jobs(id), status TEXT NOT NULL, started_at TEXT NOT NULL
 	);`)
 	if err != nil {
 		_ = db.Close()
@@ -209,13 +172,16 @@ func (s *Store) Create(ctx context.Context, request StartRequest, source string,
 		return nil, false, err
 	}
 	now := time.Now().UTC()
-	job := &Job{ID: "up-" + random, SourceVersion: source, TargetVersion: manifest.Version, ImageDigest: manifest.ImageDigest, Status: Queued, Message: "Upgrade queued", CreatedAt: now, UpdatedAt: now, Manifest: manifest, State: json.RawMessage(`{}`)}
+	job := &Job{ID: "up-" + random, SourceVersion: source, TargetVersion: manifest.Version, ImageDigest: manifest.ImageDigest, Status: Queued, Message: "Upgrade queued", CreatedAt: now, UpdatedAt: now, Manifest: manifest, State: json.RawMessage(`{}`), Actor: request.Actor}
 	body, err := json.Marshal(manifest)
 	if err != nil {
 		return nil, false, err
 	}
-	_, err = tx.ExecContext(ctx, "INSERT INTO jobs(id,request_key,fingerprint,source_version,target_version,image_digest,status,message,created_at,updated_at,manifest) VALUES(?,?,?,?,?,?,?,?,?,?,?)", job.ID, key, fp, source, job.TargetVersion, job.ImageDigest, job.Status, job.Message, now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano), string(body))
+	_, err = tx.ExecContext(ctx, "INSERT INTO jobs(id,request_key,fingerprint,source_version,target_version,image_digest,status,message,created_at,updated_at,manifest,actor) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)", job.ID, key, fp, source, job.TargetVersion, job.ImageDigest, job.Status, job.Message, now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano), string(body), request.Actor)
 	if err != nil {
+		return nil, false, err
+	}
+	if _, err = tx.ExecContext(ctx, "INSERT INTO job_steps(job_id,status,started_at) VALUES(?,?,?)", job.ID, Queued, now.Format(time.RFC3339Nano)); err != nil {
 		return nil, false, err
 	}
 	if err = tx.Commit(); err != nil {
@@ -224,12 +190,12 @@ func (s *Store) Create(ctx context.Context, request StartRequest, source string,
 	return job, true, nil
 }
 
-const jobColumns = "id,source_version,target_version,image_digest,status,message,created_at,updated_at,backup_id,manifest,state"
+const jobColumns = "id,source_version,target_version,image_digest,status,message,created_at,updated_at,backup_id,manifest,state,actor"
 
 func readJob(row *sql.Row) (*Job, error) {
 	var job Job
 	var created, updated, manifest, state string
-	err := row.Scan(&job.ID, &job.SourceVersion, &job.TargetVersion, &job.ImageDigest, &job.Status, &job.Message, &created, &updated, &job.BackupID, &manifest, &state)
+	err := row.Scan(&job.ID, &job.SourceVersion, &job.TargetVersion, &job.ImageDigest, &job.Status, &job.Message, &created, &updated, &job.BackupID, &manifest, &state, &job.Actor)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -250,15 +216,52 @@ func readJob(row *sql.Row) (*Job, error) {
 }
 
 func (s *Store) Get(ctx context.Context, id string) (*Job, error) {
-	return readJob(s.db.QueryRowContext(ctx, "SELECT "+jobColumns+" FROM jobs WHERE id=?", id))
+	job, err := readJob(s.db.QueryRowContext(ctx, "SELECT "+jobColumns+" FROM jobs WHERE id=?", id))
+	if err != nil {
+		return nil, err
+	}
+	return s.withSteps(ctx, job)
 }
 
 func (s *Store) Current(ctx context.Context) (*Job, error) {
-	return readJob(s.db.QueryRowContext(ctx, "SELECT "+jobColumns+" FROM jobs ORDER BY CASE WHEN status NOT IN ('succeeded','failed','failed_rolled_back') THEN 0 ELSE 1 END,created_at DESC LIMIT 1"))
+	job, err := readJob(s.db.QueryRowContext(ctx, "SELECT "+jobColumns+" FROM jobs ORDER BY CASE WHEN status NOT IN ('succeeded','failed','failed_rolled_back') THEN 0 ELSE 1 END,rowid DESC LIMIT 1"))
+	if err != nil {
+		return nil, err
+	}
+	return s.withSteps(ctx, job)
+}
+
+func (s *Store) withSteps(ctx context.Context, job *Job) (*Job, error) {
+	rows, err := s.db.QueryContext(ctx, "SELECT status,started_at FROM job_steps WHERE job_id=? ORDER BY id", job.ID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var step kanoupdate.Step
+		var started string
+		if err = rows.Scan(&step.Status, &started); err != nil {
+			return nil, err
+		}
+		if step.StartedAt, err = time.Parse(time.RFC3339Nano, started); err != nil {
+			return nil, err
+		}
+		job.Steps = append(job.Steps, step)
+	}
+	return job, rows.Err()
 }
 
 func (s *Store) Update(ctx context.Context, id string, status Status, message string) error {
-	result, err := s.db.ExecContext(ctx, "UPDATE jobs SET status=?,message=?,updated_at=? WHERE id=?", status, message, time.Now().UTC().Format(time.RFC3339Nano), id)
+	if !status.Valid() {
+		return errors.New("invalid upgrade step")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	result, err := tx.ExecContext(ctx, "UPDATE jobs SET status=?,message=?,updated_at=? WHERE id=?", status, message, now, id)
 	if err != nil {
 		return err
 	}
@@ -269,7 +272,10 @@ func (s *Store) Update(ctx context.Context, id string, status Status, message st
 	if count != 1 {
 		return ErrNotFound
 	}
-	return nil
+	if _, err = tx.ExecContext(ctx, "INSERT INTO job_steps(job_id,status,started_at) VALUES(?,?,?)", id, status, now); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // Checkpoint is committed before a destructive step. Its private payload may

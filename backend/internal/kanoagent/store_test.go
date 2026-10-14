@@ -1,6 +1,6 @@
 //go:build unit
 
-package kanoupdate
+package kanoagent
 
 import (
 	"context"
@@ -60,10 +60,15 @@ func TestStoreIdempotencyConcurrencyAndPersistence(t *testing.T) {
 	require.Equal(t, Restoring, current.Status)
 	require.Equal(t, job.ID, current.ID)
 	require.Equal(t, "backup-test", current.BackupID)
+	require.Equal(t, "admin:1", current.Actor)
+	require.Len(t, current.Steps, 2)
+	require.Equal(t, Queued, current.Steps[0].Status)
+	require.Equal(t, Restoring, current.Steps[1].Status)
 	body, err := json.Marshal(current)
 	require.NoError(t, err)
 	require.NotContains(t, string(body), "private_secret")
 	require.NotContains(t, string(body), "migrations")
+	require.NotContains(t, string(body), "admin:1")
 	require.NoError(t, store.Update(ctx, job.ID, Succeeded, "Upgrade complete"))
 	duplicate, created, err = store.Create(ctx, startRequest(), "v0.2.16-2", validManifest())
 	require.NoError(t, err)
@@ -104,6 +109,7 @@ func TestStoreValidationAndAttentionStaysLocked(t *testing.T) {
 	_, _, err = store.Create(ctx, request, "v0.2.16-1", validManifest())
 	require.ErrorIs(t, err, ErrBusy)
 	require.ErrorIs(t, store.Update(ctx, "missing", Failed, "Failure"), ErrNotFound)
+	require.Error(t, store.Update(ctx, job.ID, Status("unknown"), "invalid phase"))
 	require.ErrorIs(t, store.Checkpoint(ctx, "missing", map[string]string{}, ""), ErrNotFound)
 	_, err = store.Grant(ctx, "missing")
 	require.ErrorIs(t, err, ErrNotFound)

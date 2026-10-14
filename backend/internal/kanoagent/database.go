@@ -1,4 +1,4 @@
-package kanoupdate
+package kanoagent
 
 import (
 	"context"
@@ -36,7 +36,7 @@ func quoteLiteral(value string) string    { return `'` + strings.ReplaceAll(valu
 
 func (e *Engine) pgArgs(container Container, query string) []string {
 	environment := container.Environment()
-	return []string{"docker", "exec", container.ID, "psql", "-X", "-v", "ON_ERROR_STOP=1", "-U", environment["POSTGRES_USER"], "-d", environment["POSTGRES_DB"], "-At", "-c", query}
+	return []string{"docker", "exec", "-e", "PGOPTIONS=-c timezone=UTC", container.ID, "psql", "-X", "-v", "ON_ERROR_STOP=1", "-U", environment["POSTGRES_USER"], "-d", environment["POSTGRES_DB"], "-At", "-c", query}
 }
 
 func (e *Engine) pg(ctx context.Context, container Container, query string) (string, error) {
@@ -214,8 +214,20 @@ func CompareDatabase(before, after DatabaseSnapshot, manifest Manifest, private 
 			return errors.New("a historical migration checksum changed")
 		}
 	}
-	if !reflect.DeepEqual(after.Migrations, manifest.Migrations) {
+	if len(after.Migrations) != len(manifest.Migrations) {
 		return errors.New("database migrations differ from the verified release catalog")
+	}
+	for name, checksum := range manifest.Migrations {
+		// Upstream accepts specific historical checksums for migrations it once
+		// edited. Preserve the already applied checksum; only new migrations must
+		// match the current source file. The target's migration runner separately
+		// validates its historical compatibility catalog on startup.
+		if original, exists := before.Migrations[name]; exists {
+			checksum = original
+		}
+		if after.Migrations[name] != checksum {
+			return errors.New("database migrations differ from the verified release catalog")
+		}
 	}
 	expected := map[string]string{}
 	for key, value := range before.Settings {
@@ -229,7 +241,7 @@ func CompareDatabase(before, after DatabaseSnapshot, manifest Manifest, private 
 		expected = paused
 	}
 	for key, value := range policy.Settings {
-		if protectedSetting(key) {
+		if ProtectedSetting(key) {
 			return errors.New("protected authentication settings changed")
 		}
 		// Preserve a setting already customized after an earlier migration.
@@ -260,7 +272,7 @@ func (e *Engine) checkAddedValues(ctx context.Context, container Container, befo
 			if alreadyPresent {
 				continue
 			}
-			value, err := e.pg(ctx, container, "SELECT COUNT(*) FROM public."+quoteIdentifier(table)+" WHERE to_jsonb("+quoteIdentifier(name)+") IS DISTINCT FROM "+quoteLiteral(string(rule.Value))+"::jsonb")
+			value, err := e.pg(ctx, container, "SELECT COUNT(*) FROM public."+quoteIdentifier(table)+" WHERE COALESCE(to_jsonb("+quoteIdentifier(name)+"),'null'::jsonb) IS DISTINCT FROM "+quoteLiteral(string(rule.Value))+"::jsonb")
 			if err != nil {
 				return err
 			}

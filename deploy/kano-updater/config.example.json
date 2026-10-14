@@ -1,0 +1,17 @@
+{
+  "deployment_dir": "/opt/sub2api-deploy",
+  "compose_files": [
+    "/opt/sub2api-deploy/docker-compose.yml",
+    "/opt/sub2api-deploy/kano-updater.compose.json",
+    "/opt/sub2api-deploy/kano-image.override.json"
+  ],
+  "image_override": "/opt/sub2api-deploy/kano-image.override.json",
+  "backup_dir": "/opt/sub2api-backups",
+  "state_dir": "/var/lib/kano-updater",
+  "maintenance_file": "/var/lib/kano-updater-public/maintenance",
+  "control_socket": "/run/kano-updater/control/agent.sock",
+  "progress_socket": "/run/kano-updater/progress/agent.sock",
+  "control_gid": 1000,
+  "progress_gid": 33,
+  "live_url": "http://127.0.0.1:8081"
+}

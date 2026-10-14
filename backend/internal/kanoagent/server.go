@@ -1,4 +1,4 @@
-package kanoupdate
+package kanoagent
 
 import (
 	"bytes"
@@ -33,22 +33,6 @@ type Server struct {
 	mu       sync.Mutex
 	latest   *Release
 	latestAt time.Time
-}
-
-type Availability struct {
-	AgentVersion    string   `json:"agent_version"`
-	ProtocolVersion int      `json:"protocol_version"`
-	Ready           bool     `json:"ready"`
-	Busy            bool     `json:"busy"`
-	CurrentVersion  string   `json:"current_version,omitempty"`
-	Release         *Release `json:"release,omitempty"`
-	Warning         string   `json:"warning,omitempty"`
-}
-
-type Session struct {
-	Job         *Job   `json:"job"`
-	Capability  string `json:"capability"`
-	ProgressURL string `json:"progress_url"`
 }
 
 func NewServer(store *Store, source ReleaseSource, executor Executor) *Server {
@@ -129,7 +113,7 @@ func (s *Server) ControlHandler() http.Handler {
 		if !decodeRequest(w, r, &request) {
 			return
 		}
-		if !newReleasePattern.MatchString(request.Version) || !digestPattern.MatchString(request.ExpectedDigest) {
+		if !ValidReleaseVersion(request.Version) || !ValidDigest(request.ExpectedDigest) {
 			writeError(w, 400, "Invalid update target")
 			return
 		}
@@ -217,6 +201,8 @@ func (s *Server) session(ctx context.Context, job *Job) (*Session, error) {
 // Run resumes interrupted work even when no application process is available.
 // The host deployment lock must be held for this server's lifetime.
 func (s *Server) Run(ctx context.Context) {
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
 	select {
 	case s.Wake <- struct{}{}:
 	default:
@@ -226,6 +212,7 @@ func (s *Server) Run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-s.Wake:
+		case <-ticker.C:
 		}
 		job, err := s.Store.Current(ctx)
 		if err != nil || job == nil || !job.Status.Active() || job.Status == NeedsAttention {
@@ -242,8 +229,6 @@ func (s *Server) Run(ctx context.Context) {
 		}
 	}
 }
-
-func CookieName(jobID string) string { return "kano_update_" + strings.TrimPrefix(jobID, "up-") }
 
 //go:embed progress.html
 var progressHTML string

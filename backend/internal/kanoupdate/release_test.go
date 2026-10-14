@@ -71,6 +71,8 @@ func TestGitHubSourceSelectsNumericForkReleaseAndManifest(t *testing.T) {
 	source.Client.Transport = roundTripper(func(r *http.Request) (*http.Response, error) {
 		var body string
 		switch {
+		case strings.Contains(r.URL.Path, "/git/ref/tags/"):
+			body = `{"object":{"type":"commit","sha":"` + m.Revision + `"}}`
 		case strings.Contains(r.URL.Path, "/releases/download/"):
 			body = string(manifest)
 		case strings.Contains(r.URL.Path, "/releases/tags/"):
@@ -91,6 +93,39 @@ func TestGitHubSourceSelectsNumericForkReleaseAndManifest(t *testing.T) {
 	require.Error(t, err)
 	_, err = source.fetchReleaseForTest(context.Background(), "http://127.0.0.1/private")
 	require.Error(t, err)
+}
+
+func TestReleaseSourceChecksAnnotatedTagsAndRejectsWrongCommits(t *testing.T) {
+	for _, fault := range []string{"", "mismatch", "invalid", "recursive"} {
+		t.Run(fault, func(t *testing.T) {
+			m := validManifest()
+			source := NewGitHubSource()
+			source.Client.Transport = roundTripper(func(r *http.Request) (*http.Response, error) {
+				kind, sha := "tag", strings.Repeat("d", 40)
+				if strings.Contains(r.URL.Path, "/git/tags/") {
+					kind = "commit"
+					sha = m.Revision
+					if fault == "mismatch" {
+						sha = strings.Repeat("e", 40)
+					}
+					if fault == "recursive" {
+						kind = "tag"
+					}
+				}
+				if fault == "invalid" {
+					sha = "invalid"
+				}
+				body, _ := json.Marshal(map[string]any{"object": gitObject{Type: kind, SHA: sha}})
+				return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(string(body)))}, nil
+			})
+			err := source.verifyTag(context.Background(), m.Version, m.Revision)
+			if fault == "" {
+				require.NoError(t, err)
+			} else {
+				require.Error(t, err)
+			}
+		})
+	}
 }
 
 func (s *GitHubSource) fetchReleaseForTest(ctx context.Context, address string) (*Release, error) {

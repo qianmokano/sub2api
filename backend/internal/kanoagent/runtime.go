@@ -1,4 +1,4 @@
-package kanoupdate
+package kanoagent
 
 import (
 	"bytes"
@@ -64,6 +64,9 @@ func (c Config) Validate() error {
 	}
 	if c.ControlGID < 0 || c.ProgressGID < 0 {
 		return errors.New("invalid updater socket group")
+	}
+	if inside(c.MaintenanceFile, "/run") || inside(c.MaintenanceFile, "/var/run") || inside(c.MaintenanceFile, c.StateDir) || inside(c.MaintenanceFile, c.DeploymentDir) {
+		return errors.New("maintenance gate must persist outside volatile runtime and private application/state directories")
 	}
 	return nil
 }
@@ -181,6 +184,8 @@ type UpgradeState struct {
 	ProductionTouched bool             `json:"production_touched"`
 	PublicCommitted   bool             `json:"public_committed"`
 	Snapshot          *RuntimeSnapshot `json:"snapshot,omitempty"`
+	DumpDigest        string           `json:"dump_digest"`
+	GlobalsDigest     string           `json:"globals_digest"`
 }
 
 type ImageVerifier interface {
@@ -192,6 +197,7 @@ type Engine struct {
 	Runner   Runner
 	Source   ReleaseSource
 	Verifier ImageVerifier
+	Redis    RedisBackend
 }
 
 func (e *Engine) run(ctx context.Context, args ...string) ([]byte, error) {
@@ -243,7 +249,7 @@ func (e *Engine) CurrentVersion(ctx context.Context) (string, error) {
 		return "", err
 	}
 	version := app.Config.Labels["org.opencontainers.image.version"]
-	if _, err = versionParts(version); err != nil {
+	if _, err = ParseVersion(version); err != nil {
 		return "", errors.New("running application is not a labeled fork image")
 	}
 	return version, nil
@@ -278,7 +284,7 @@ func (e *Engine) snapshotRuntime(ctx context.Context) (*RuntimeSnapshot, error) 
 	}
 	app := result.Containers["sub2api"]
 	version := app.Config.Labels["org.opencontainers.image.version"]
-	if _, err = versionParts(version); err != nil || app.State.Health.Status != "healthy" {
+	if _, err = ParseVersion(version); err != nil || app.State.Health.Status != "healthy" {
 		return nil, errors.New("current fork application must be healthy")
 	}
 	pgEnv := result.Containers["postgres"].Environment()
@@ -292,6 +298,10 @@ func (e *Engine) snapshotRuntime(ctx context.Context) (*RuntimeSnapshot, error) 
 			}
 			if err = validateDataPath(mount.Source, e.Config); err != nil {
 				return nil, err
+			}
+			resolved, resolveErr := filepath.EvalSymlinks(mount.Source)
+			if resolveErr != nil || resolved != filepath.Clean(mount.Source) {
+				return nil, errors.New("symlinked data mount sources require manual upgrade")
 			}
 		}
 	}
@@ -372,7 +382,7 @@ func (e *Engine) Prepare(ctx context.Context, m Manifest) error {
 	}
 	platforms := map[string]bool{}
 	for _, entry := range index.Manifests {
-		if entry.Platform.OS == "linux" && digestPattern.MatchString(entry.Digest) {
+		if entry.Platform.OS == "linux" && ValidDigest(entry.Digest) {
 			platforms[entry.Platform.Architecture] = true
 		}
 	}

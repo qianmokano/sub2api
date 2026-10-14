@@ -1,9 +1,10 @@
 //go:build unit
 
-package kanoupdate
+package kanoagent
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -15,16 +16,69 @@ import (
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
+	miniserver "github.com/alicebob/miniredis/v2/server"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
 )
 
 func testConfig(t *testing.T) Config {
 	t.Helper()
-	root := t.TempDir()
+	root, canonicalErr := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, canonicalErr)
 	deployment := filepath.Join(root, "deployment")
 	require.NoError(t, os.MkdirAll(deployment, 0o700))
 	return Config{DeploymentDir: deployment, ComposeFiles: []string{filepath.Join(deployment, "compose.yml"), filepath.Join(deployment, "image.json")}, ImageOverride: filepath.Join(deployment, "image.json"), BackupDir: filepath.Join(root, "backups"), StateDir: filepath.Join(root, "state"), MaintenanceFile: filepath.Join(root, "public", "maintenance"), ControlSocket: filepath.Join(root, "control", "agent.sock"), ProgressSocket: filepath.Join(root, "progress", "agent.sock"), ControlGID: os.Getgid(), ProgressGID: os.Getgid(), LiveURL: "http://127.0.0.1:18081"}
+}
+
+func TestNativeRedisSnapshotsEveryDatabaseAndSavesWithoutChangingValues(t *testing.T) {
+	ctx := context.Background()
+	server := miniredis.RunT(t)
+	server.SetTime(time.Now())
+	server.RequireAuth("fixture-password")
+	configuration := "2"
+	require.NoError(t, server.Server().Register("CONFIG", func(peer *miniserver.Peer, _ string, _ []string) {
+		peer.WriteLen(2)
+		peer.WriteBulk("databases")
+		peer.WriteBulk(configuration)
+	}))
+	require.NoError(t, server.Server().Register("SAVE", func(peer *miniserver.Peer, _ string, _ []string) { peer.WriteInline("OK") }))
+	container := Container{ID: "redis"}
+	container.Config.Cmd = []string{"redis-server", "--port", server.Port()}
+	container.Config.Env = []string{"REDIS_PASSWORD=fixture-password"}
+	container.NetworkSettings.Networks = map[string]struct{ IPAddress string }{"private": {IPAddress: "127.0.0.1"}}
+	for db := 0; db < 2; db++ {
+		client, err := redisClient(container, container, db)
+		require.NoError(t, err)
+		require.NoError(t, client.Set(ctx, "same-key", []byte{byte(db), 255}, time.Hour).Err())
+		require.NoError(t, client.Close())
+	}
+	backend := nativeRedis{}
+	before, err := backend.Snapshot(ctx, container, container)
+	require.NoError(t, err)
+	require.Len(t, before, 2)
+	key := hex.EncodeToString([]byte("same-key"))
+	require.Len(t, before[0], 1)
+	require.Len(t, before[1], 1)
+	require.NotEqual(t, before[0][key].Digest, before[1][key].Digest)
+	require.NoError(t, backend.Save(ctx, container))
+	after, err := backend.Snapshot(ctx, container, container)
+	require.NoError(t, err)
+	require.Equal(t, before, after)
+	require.NoError(t, compareRedis(before, after, time.Now()))
+	configuration = "invalid"
+	_, err = backend.Snapshot(ctx, container, container)
+	require.Error(t, err)
+	configuration = "2000"
+	_, err = backend.Snapshot(ctx, container, container)
+	require.Error(t, err)
+	container.Config.Cmd = []string{"redis-server", "--port", "invalid"}
+	_, err = redisAddress(container)
+	require.Error(t, err)
+	container.Config.Cmd = []string{"redis-server", "--port"}
+	_, err = redisAddress(container)
+	require.Error(t, err)
+	_, err = redisClient(Container{}, Container{}, 0)
+	require.Error(t, err)
 }
 
 type runnerFunc func(context.Context, []string, io.Reader, io.Writer) ([]byte, error)
@@ -43,7 +97,7 @@ func TestConfigRejectsAmbiguousOrUnsafeDeployment(t *testing.T) {
 	require.Equal(t, base, loaded)
 	for _, mutate := range []func(*Config){func(c *Config) { c.StateDir = "relative" }, func(c *Config) { c.BackupDir = c.DeploymentDir }, func(c *Config) { c.StateDir = filepath.Join(c.DeploymentDir, "state") }, func(c *Config) { c.ImageOverride = filepath.Join(t.TempDir(), "other") }, func(c *Config) { c.ComposeFiles = nil }, func(c *Config) {
 		c.ComposeFiles = []string{c.ImageOverride, filepath.Join(c.DeploymentDir, "compose.yml")}
-	}, func(c *Config) { c.LiveURL = "https://evil.test" }, func(c *Config) { c.LiveURL = "http://user@127.0.0.1:8080" }, func(c *Config) { c.LiveURL = "http://127.0.0.1:8080/path" }, func(c *Config) { c.ControlGID = -1 }} {
+	}, func(c *Config) { c.LiveURL = "https://evil.test" }, func(c *Config) { c.LiveURL = "http://user@127.0.0.1:8080" }, func(c *Config) { c.LiveURL = "http://127.0.0.1:8080/path" }, func(c *Config) { c.ControlGID = -1 }, func(c *Config) { c.MaintenanceFile = "/run/kano-updater/maintenance" }} {
 		value := base
 		value.ComposeFiles = append([]string(nil), base.ComposeFiles...)
 		mutate(&value)

@@ -71,6 +71,11 @@ func versionParts(value string) ([4]uint64, error) {
 	return result, nil
 }
 
+func ParseVersion(value string) ([4]uint64, error) { return versionParts(value) }
+func ValidReleaseVersion(value string) bool        { return newReleasePattern.MatchString(value) }
+func ValidDigest(value string) bool                { return digestPattern.MatchString(value) }
+func ProtectedSetting(key string) bool             { return protectedSetting(key) }
+
 type ColumnRule struct {
 	Type     string          `json:"type"`
 	Nullable bool            `json:"nullable"`
@@ -102,6 +107,9 @@ type Manifest struct {
 func (m Manifest) Validate() error {
 	if m.SchemaVersion != ProtocolVersion || !newReleasePattern.MatchString(m.Version) {
 		return errors.New("unsupported update manifest or release version")
+	}
+	if _, err := versionParts(m.Version); err != nil {
+		return errors.New("invalid fork release version")
 	}
 	if m.Image != ImageRepository+":"+m.Version || !digestPattern.MatchString(m.ImageDigest) || !revisionPattern.MatchString(m.Revision) {
 		return errors.New("update manifest image, digest or revision is invalid")
@@ -293,9 +301,43 @@ func (s *GitHubSource) attachManifest(ctx context.Context, release *Release) (*R
 		if manifest.Version != release.Tag {
 			return nil, errors.New("manifest version differs from its release")
 		}
+		if err = s.verifyTag(ctx, release.Tag, manifest.Revision); err != nil {
+			return nil, err
+		}
 		release.Manifest = &manifest
 		return release, nil
 	}
 	release.UnavailableReason = "This release has no verified container update manifest"
 	return release, nil
+}
+
+type gitObject struct {
+	Type string `json:"type"`
+	SHA  string `json:"sha"`
+}
+
+func (s *GitHubSource) verifyTag(ctx context.Context, version, revision string) error {
+	var reference struct {
+		Object gitObject `json:"object"`
+	}
+	if err := s.fetch(ctx, s.APIBase+"/repos/"+Repository+"/git/ref/tags/"+url.PathEscape(version), &reference); err != nil {
+		return err
+	}
+	object := reference.Object
+	for depth := 0; depth < 5 && object.Type == "tag"; depth++ {
+		if !revisionPattern.MatchString(object.SHA) {
+			return errors.New("invalid release source tag")
+		}
+		var annotated struct {
+			Object gitObject `json:"object"`
+		}
+		if err := s.fetch(ctx, s.APIBase+"/repos/"+Repository+"/git/tags/"+object.SHA, &annotated); err != nil {
+			return err
+		}
+		object = annotated.Object
+	}
+	if object.Type != "commit" || object.SHA != revision {
+		return errors.New("release source tag differs from its manifest")
+	}
+	return nil
 }

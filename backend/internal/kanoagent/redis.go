@@ -1,4 +1,4 @@
-package kanoupdate
+package kanoagent
 
 import (
 	"context"
@@ -23,6 +23,27 @@ type RedisEntry struct {
 
 type RedisSnapshot []map[string]RedisEntry
 
+type RedisBackend interface {
+	Snapshot(context.Context, Container, Container) (RedisSnapshot, error)
+	Save(context.Context, Container) error
+}
+
+type nativeRedis struct{}
+
+func (nativeRedis) Snapshot(ctx context.Context, container, identity Container) (RedisSnapshot, error) {
+	return snapshotRedis(ctx, container, identity)
+}
+func (nativeRedis) Save(ctx context.Context, container Container) error {
+	return saveRedis(ctx, container)
+}
+
+func (e *Engine) redisBackend() RedisBackend {
+	if e.Redis != nil {
+		return e.Redis
+	}
+	return nativeRedis{}
+}
+
 func redisPassword(container Container) string {
 	environment := container.Environment()
 	password := environment["REDISCLI_AUTH"]
@@ -41,13 +62,26 @@ func redisPassword(container Container) string {
 }
 
 func redisAddress(container Container) (string, error) {
+	port := "6379"
+	for index, part := range container.Config.Cmd {
+		if part == "--port" {
+			if index+1 >= len(container.Config.Cmd) {
+				return "", errors.New("Redis port is missing")
+			}
+			port = container.Config.Cmd[index+1]
+			number, err := strconv.Atoi(port)
+			if err != nil || number < 1 || number > 65535 {
+				return "", errors.New("Redis port is invalid")
+			}
+		}
+	}
 	for _, name := range sortedKeys(container.NetworkSettings.Networks) {
 		address := container.NetworkSettings.Networks[name].IPAddress
 		if address != "" {
 			if net.ParseIP(address) == nil {
 				return "", errors.New("invalid Redis container address")
 			}
-			return net.JoinHostPort(address, "6379"), nil
+			return net.JoinHostPort(address, port), nil
 		}
 	}
 	return "", errors.New("Redis container has no private network address")
