@@ -25,12 +25,22 @@ func (e *Engine) checkpoint(ctx context.Context, store *Store, job *Job, state *
 // excuse to continue an unverified switch. After public commit it only finalizes;
 // it can no longer replace the database with an older snapshot.
 func (e *Engine) Execute(ctx context.Context, store *Store, job *Job) (err error) {
+	if err = e.Config.Validate(); err != nil {
+		return err
+	}
+	defer func() {
+		if err != nil && jobPattern.MatchString(job.ID) {
+			_ = writePrivateJSON(filepath.Join(e.Config.StateDir, "diagnostics", "operation-"+job.ID+".json"), map[string]any{
+				"operation_id": job.ID,
+				"version":      job.TargetVersion,
+				"recorded_at":  time.Now().UTC(),
+				"error":        err.Error(),
+			})
+		}
+	}()
 	state := &UpgradeState{}
 	if len(job.State) > 0 && json.Unmarshal(job.State, state) != nil {
 		return errors.New("updater recovery checkpoint is invalid")
-	}
-	if err = e.Config.Validate(); err != nil {
-		return err
 	}
 	if state.Maintenance || state.ProductionTouched || state.PublicCommitted {
 		return e.recover(ctx, store, job, state)

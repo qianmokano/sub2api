@@ -26,7 +26,7 @@ sudo kano-updater start --version vX.Y.Z-N --digest sha256:已发布的固定摘
 
 执行状态、操作者、每步时间和恢复检查点保存在 `/var/lib/kano-updater/jobs.sqlite`，不依赖应用数据库。服务或主机重启后自动处理未完成任务：生产未迁移时启动旧版；迁移后且未开放流量时恢复旧镜像及全部更新前数据。开放流量的持久化提交点之后，不再自动恢复旧数据库，避免覆盖新业务写入。
 
-恢复失败时保持维护，任务显示需要管理员处理。受保护的 `/var/lib/kano-updater/diagnostics` 和任务备份目录保存详细诊断；页面不显示配置、凭据或原始命令输出。先修复实际故障，再停止执行服务并手动恢复：
+恢复失败时保持维护，任务显示需要管理员处理。受保护的 `/var/lib/kano-updater/diagnostics` 和任务备份目录保存详细诊断；`operation-<任务编号>.json` 记录具体失败原因，包括磁盘预检及检查点校验等非命令错误。诊断目录和文件仅 root 可读，页面不显示配置、凭据或原始命令输出。先修复实际故障，再停止执行服务并手动恢复：
 
 ```sh
 sudo systemctl stop kano-updater

@@ -20,7 +20,7 @@ import (
 const (
 	Repository      = "qianmokano/sub2api"
 	ImageRepository = "ghcr.io/qianmokano/sub2api"
-	AgentVersion    = "1.0.0"
+	AgentVersion    = "1.0.1"
 	ManifestName    = "kano-update.json"
 	ProtocolVersion = 1
 )
