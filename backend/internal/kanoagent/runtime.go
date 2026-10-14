@@ -104,7 +104,10 @@ func (r CommandRunner) Run(ctx context.Context, args []string, input io.Reader, 
 	if len(args) == 0 {
 		return nil, errors.New("empty updater command")
 	}
-	command := exec.CommandContext(ctx, args[0], args[1:]...)
+	// The root-only engine/installer constructs fixed argument lists from
+	// validated deployment paths and release metadata; callers cannot submit
+	// executable names, commands or shell expressions through the protocol.
+	command := exec.CommandContext(ctx, args[0], args[1:]...) //nolint:gosec // G702: this is the trusted host executor boundary described above.
 	command.Stdin = input
 	var stdout, stderr bytes.Buffer
 	if output != nil {

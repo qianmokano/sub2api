@@ -150,9 +150,10 @@ func nginxClosingBrace(source string, start int) (int, error) {
 			continue
 		}
 		if quote != 0 {
-			if character == '\\' {
+			switch character {
+			case '\\':
 				escaped = true
-			} else if character == quote {
+			case quote:
 				quote = 0
 			}
 			continue

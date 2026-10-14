@@ -438,7 +438,7 @@ func (e *Engine) isolatedRestore(ctx context.Context, state *UpgradeState, manif
 	postgres := state.Snapshot.Containers["postgres"]
 	pgdata := state.Snapshot.PostgresData
 	if pgdata == "" {
-		return errors.New("PostgreSQL data location is missing")
+		return errors.New("postgresql data location is missing")
 	}
 	var dataMount *Mount
 	for _, mount := range postgres.Mounts {
@@ -448,7 +448,7 @@ func (e *Engine) isolatedRestore(ctx context.Context, state *UpgradeState, manif
 		}
 	}
 	if dataMount == nil {
-		return errors.New("PostgreSQL data was not inside a captured mount")
+		return errors.New("postgresql data was not inside a captured mount")
 	}
 	relative, _ := filepath.Rel(dataMount.Destination, pgdata)
 	info, err := os.Stat(filepath.Join(state.Snapshot.MountBackups[dataMount.Source], relative))
@@ -457,7 +457,7 @@ func (e *Engine) isolatedRestore(ctx context.Context, state *UpgradeState, manif
 	}
 	stat, ok := info.Sys().(*syscall.Stat_t)
 	if !ok {
-		return errors.New("PostgreSQL data ownership is unavailable")
+		return errors.New("postgresql data ownership is unavailable")
 	}
 	if err = os.Chown(cluster, int(stat.Uid), int(stat.Gid)); err != nil {
 		return err

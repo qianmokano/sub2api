@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
-import { mkdir } from 'node:fs/promises'
+import { mkdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
 const require = createRequire(path.join(process.env.KANO_BROWSER_MODULE_ROOT || process.cwd(), 'package.json'))
@@ -12,6 +12,21 @@ const browser = await chromium.launch({ headless: true })
 const context = await browser.newContext({ ignoreHTTPSErrors: true, locale: 'en-US' })
 const page = await context.newPage()
 page.setDefaultTimeout(30_000)
+const diagnostics = []
+const pending = new Set()
+page.on('request', request => pending.add(new URL(request.url()).pathname))
+page.on('requestfinished', request => pending.delete(new URL(request.url()).pathname))
+page.on('pageerror', error => diagnostics.push({ type: 'pageerror', message: error.message }))
+page.on('console', message => {
+  if (message.type() === 'error') diagnostics.push({ type: 'console', message: message.text().slice(0, 1000) })
+})
+page.on('requestfailed', request => diagnostics.push({
+  type: 'requestfailed', path: new URL(request.url()).pathname, message: request.failure()?.errorText
+}))
+page.on('response', response => {
+  if (diagnostics.length < 100) diagnostics.push({ type: 'loaded', path: new URL(response.url()).pathname, status: response.status(), mime: response.headers()['content-type'] })
+  if (response.status() >= 400) diagnostics.push({ type: 'response', path: new URL(response.url()).pathname, status: response.status() })
+})
 let passed = false
 try {
   const readyDeadline = Date.now() + 180_000
@@ -29,6 +44,18 @@ try {
   assert.equal(login.status(), 200)
   const { data: session } = await login.json()
   assert.ok(session.access_token && session.user.role === 'admin')
+  const authorization = { Authorization: `Bearer ${session.access_token}` }
+  const compliance = await context.request.get(`${origin}/api/v1/admin/compliance`, { headers: authorization })
+  assert.equal(compliance.status(), 200)
+  const { data: declaration } = await compliance.json()
+  if (declaration.required) {
+    const accepted = await context.request.post(`${origin}/api/v1/admin/compliance/accept`, {
+      headers: authorization,
+      data: { phrase: declaration.ack_phrase_en, language: 'en' }
+    })
+    assert.equal(accepted.status(), 200)
+    assert.equal((await accepted.json()).data.required, false)
+  }
   await context.addInitScript(session => {
     localStorage.setItem('auth_token', session.access_token)
     localStorage.setItem('auth_user', JSON.stringify(session.user))
@@ -93,7 +120,10 @@ try {
   passed = true
   console.log('HTTPS browser upgrade passed: real 202, scoped cookie, anonymous 403, refresh during maintenance, retained administrator session and recent task.')
 } finally {
-  if (!passed) await page.screenshot({ path: path.join(artifacts, 'failure.png'), fullPage: true }).catch(() => {})
+  if (!passed) {
+    await page.screenshot({ path: path.join(artifacts, 'failure.png'), fullPage: true }).catch(() => {})
+    await writeFile(path.join(artifacts, 'diagnostics.json'), JSON.stringify({ url: page.url(), pending: [...pending], dom: await page.locator('body').innerHTML(), diagnostics }, null, 2))
+  }
   await context.request.post(`${origin}/fixture/done?ok=${passed}`).catch(() => {})
   await browser.close()
 }

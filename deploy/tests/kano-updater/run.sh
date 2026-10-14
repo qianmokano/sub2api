@@ -4,8 +4,13 @@ set -euo pipefail
 repository=$(cd "$(dirname "$0")/../../.." && pwd)
 fixture_build=$(mktemp -d)
 fixture_id="kano-updater-ci-${GITHUB_RUN_ID:-local}-$$"
-fixture_volume="$fixture_id-data"
+fixture_volume="ku-${GITHUB_RUN_ID:-local}-$$"
 fixture_root="/var/lib/docker/volumes/$fixture_volume/_data"
+fixture_socket="$fixture_root/kano-updater-it-1234567890/progress/agent.sock"
+if [[ ${#fixture_socket} -ge 104 ]]; then
+  echo 'Docker fixture volume name exceeds the Unix socket path budget.' >&2
+  exit 1
+fi
 cleanup() {
   docker rm -f "$fixture_id" >/dev/null 2>&1 || true
   docker volume rm "$fixture_volume" >/dev/null 2>&1 || true

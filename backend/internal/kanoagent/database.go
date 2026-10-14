@@ -42,7 +42,7 @@ func (e *Engine) pgArgs(container Container, query string) []string {
 func (e *Engine) pg(ctx context.Context, container Container, query string) (string, error) {
 	environment := container.Environment()
 	if environment["POSTGRES_USER"] == "" || environment["POSTGRES_DB"] == "" {
-		return "", errors.New("PostgreSQL runtime identity is missing")
+		return "", errors.New("postgresql runtime identity is missing")
 	}
 	value, err := e.run(ctx, e.pgArgs(container, query)...)
 	return strings.TrimSpace(string(value)), err

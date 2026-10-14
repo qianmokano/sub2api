@@ -76,12 +76,12 @@ func redisAddress(container Container) (string, error) {
 	for index, part := range container.Config.Cmd {
 		if part == "--port" {
 			if index+1 >= len(container.Config.Cmd) {
-				return "", errors.New("Redis port is missing")
+				return "", errors.New("redis port is missing")
 			}
 			port = container.Config.Cmd[index+1]
 			number, err := strconv.Atoi(port)
 			if err != nil || number < 1 || number > 65535 {
-				return "", errors.New("Redis port is invalid")
+				return "", errors.New("redis port is invalid")
 			}
 		}
 	}
@@ -94,7 +94,7 @@ func redisAddress(container Container) (string, error) {
 			return net.JoinHostPort(address, port), nil
 		}
 	}
-	return "", errors.New("Redis container has no private network address")
+	return "", errors.New("redis container has no private network address")
 }
 
 func redisClient(container, identity Container, db int) (*redis.Client, error) {
@@ -112,7 +112,7 @@ func waitRedis(ctx context.Context, client *redis.Client) error {
 			return nil
 		}
 		if !strings.HasPrefix(err.Error(), "LOADING ") {
-			return errors.New("Redis backup connection unavailable")
+			return errors.New("redis backup connection unavailable")
 		}
 		select {
 		case <-ctx.Done():
@@ -120,7 +120,7 @@ func waitRedis(ctx context.Context, client *redis.Client) error {
 		case <-time.After(time.Second):
 		}
 	}
-	return errors.New("Redis restore readiness timed out")
+	return errors.New("redis restore readiness timed out")
 }
 
 func canonicalRedis(ctx context.Context, client *redis.Client, key, kind string) (string, error) {
@@ -197,7 +197,7 @@ func snapshotRedis(ctx context.Context, container, identity Container) (RedisSna
 	}
 	configuration, err := client.ConfigGet(ctx, "databases").Result()
 	if err != nil {
-		return nil, errors.New("Redis database catalog is unavailable")
+		return nil, errors.New("redis database catalog is unavailable")
 	}
 	count, err := strconv.Atoi(configuration["databases"])
 	if err != nil || count < 1 || count > 1024 {
@@ -228,12 +228,12 @@ func snapshotRedisDatabase(ctx context.Context, client *redis.Client) (map[strin
 	for {
 		keys, next, scanErr := client.Scan(ctx, cursor, "*", 1000).Result()
 		if scanErr != nil {
-			return nil, errors.New("Redis key snapshot is unavailable")
+			return nil, errors.New("redis key snapshot is unavailable")
 		}
 		for _, key := range keys {
 			kind, typeErr := client.Type(ctx, key).Result()
 			if typeErr != nil {
-				return nil, errors.New("Redis key type is unavailable")
+				return nil, errors.New("redis key type is unavailable")
 			}
 			if kind == "none" {
 				continue
@@ -243,11 +243,11 @@ func snapshotRedisDatabase(ctx context.Context, client *redis.Client) (map[strin
 				continue
 			}
 			if valueErr != nil {
-				return nil, errors.New("Redis value cannot be completely verified")
+				return nil, errors.New("redis value cannot be completely verified")
 			}
 			expires, expireErr := client.Do(ctx, "PEXPIRETIME", key).Int64()
 			if expireErr != nil {
-				return nil, errors.New("Redis absolute expiry is unavailable")
+				return nil, errors.New("redis absolute expiry is unavailable")
 			}
 			if expires == -2 {
 				continue
@@ -264,7 +264,7 @@ func snapshotRedisDatabase(ctx context.Context, client *redis.Client) (map[strin
 
 func compareRedis(before, after RedisSnapshot, now time.Time) error {
 	if len(before) != len(after) {
-		return errors.New("Redis database count changed")
+		return errors.New("redis database count changed")
 	}
 	for database, expected := range before {
 		for key, entry := range expected {
@@ -295,7 +295,7 @@ func saveRedis(ctx context.Context, container Container) error {
 		return err
 	}
 	if err = client.Save(ctx).Err(); err != nil {
-		return errors.New("Redis snapshot failed")
+		return errors.New("redis snapshot failed")
 	}
 	return nil
 }

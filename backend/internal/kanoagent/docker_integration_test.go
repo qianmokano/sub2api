@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"testing"
@@ -194,19 +195,28 @@ func TestKanoUpdaterDockerWorker(t *testing.T) {
 	upstream, err := url.Parse("http://127.0.0.1:19081")
 	require.NoError(t, err)
 	proxy := httputil.NewSingleHostReverseProxy(upstream)
+	var addressMu sync.Mutex
+	address := "127.0.0.1:19081"
+	var addressAt time.Time
 	proxy.Director = func(request *http.Request) {
-		container, inspectErr := engine.container(request.Context(), "sub2api")
-		address := "127.0.0.1:19081"
-		if inspectErr == nil {
-			for _, network := range sortedKeys(container.NetworkSettings.Networks) {
-				if ip := container.NetworkSettings.Networks[network].IPAddress; ip != "" {
-					address = net.JoinHostPort(ip, "8080")
-					break
+		// Concurrent frontend chunks must not launch a Docker CLI per request.
+		// Refresh the short-lived address after container recreation instead.
+		addressMu.Lock()
+		if time.Since(addressAt) >= time.Second {
+			container, inspectErr := engine.container(request.Context(), "sub2api")
+			if inspectErr == nil {
+				for _, network := range sortedKeys(container.NetworkSettings.Networks) {
+					if ip := container.NetworkSettings.Networks[network].IPAddress; ip != "" {
+						address = net.JoinHostPort(ip, "8080")
+						break
+					}
 				}
 			}
+			addressAt = time.Now()
 		}
 		request.URL.Scheme = "http"
 		request.URL.Host = address
+		addressMu.Unlock()
 	}
 	proxyServer := &http.Server{Addr: "127.0.0.1:19082", ReadHeaderTimeout: 5 * time.Second, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if runner.newHealth.Load() {
@@ -242,6 +252,14 @@ func startDockerWorker(t *testing.T, configPath, fault string) *exec.Cmd {
 	command.Stderr = log
 	require.NoError(t, command.Start())
 	require.NoError(t, log.Close())
+	t.Cleanup(func() {
+		if t.Failed() {
+			body, readErr := os.ReadFile(log.Name())
+			if readErr == nil {
+				t.Logf("fixture worker diagnostic: %s", body)
+			}
+		}
+	})
 	return command
 }
 
