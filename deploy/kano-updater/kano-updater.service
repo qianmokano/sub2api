@@ -1,0 +1,25 @@
+[Unit]
+Description=Kano sub2api verified container updater
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/local/bin/kano-updater serve --config /etc/kano-updater/config.json
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=1300
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target

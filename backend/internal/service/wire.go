@@ -8,6 +8,7 @@ import (
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/kanoupdate"
 	"github.com/Wei-Shaw/sub2api/internal/payment"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/antigravity"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
@@ -44,8 +45,12 @@ func ProvidePricingService(cfg *config.Config, remoteClient PricingRemoteClient)
 }
 
 // ProvideUpdateService creates UpdateService with BuildInfo
-func ProvideUpdateService(cache UpdateCache, githubClient GitHubReleaseClient, buildInfo BuildInfo) *UpdateService {
-	return NewUpdateService(cache, githubClient, buildInfo.Version, buildInfo.BuildType)
+func ProvideUpdateService(cache UpdateCache, githubClient GitHubReleaseClient, buildInfo BuildInfo, cfg *config.Config) *UpdateService {
+	svc := NewUpdateService(cache, githubClient, buildInfo.Version, buildInfo.BuildType)
+	if cfg.Update.ContainerEnabled {
+		svc.WithContainerUpdater(kanoupdate.NewClient(cfg.Update.SocketPath))
+	}
+	return svc
 }
 
 // ProvideEmailQueueService creates EmailQueueService with default worker count

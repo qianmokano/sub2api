@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>通行证网关 · 升级进度</title>
+  <style nonce="{{.Nonce}}">
+    :root{color-scheme:light dark;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#f5f6f8;color:#172033}
+    body{margin:0;padding:48px 20px}main{max-width:620px;margin:auto;background:#fff;border:1px solid #e5e7eb;border-radius:20px;padding:32px;box-shadow:0 8px 32px #17203308}
+    h1{font-size:24px;margin:0 0 12px}p{line-height:1.7;color:#566174}.versions{color:#172033;font-weight:600}.step{padding:18px 20px;border-radius:12px;background:#eef4ff;border:1px solid #d7e5ff;font-weight:600;margin:24px 0}
+    .meta{font-size:13px;overflow-wrap:anywhere}.error{background:#fff1f1;border-color:#f3c5c5;color:#b42318}.done{background:#edfaf3;border-color:#c1e7d2;color:#067647}a{display:inline-block;color:#2563eb;padding:10px 0;text-decoration:none}button{font:inherit;border:0;background:transparent;color:#2563eb;cursor:pointer;padding:0}#result{white-space:pre-line}
+    @media(prefers-color-scheme:dark){:root{background:#111827;color:#e5e7eb}main{background:#1f2937;border-color:#374151}p{color:#aeb9ca}.versions{color:#e5e7eb}.step{background:#1c3150;border-color:#35547e}.error{background:#432727;border-color:#765353;color:#fecaca}.done{background:#183e2e;border-color:#346e53;color:#a7f3d0}a,button{color:#93c5fd}}
+  </style>
+</head>
+<body><main data-job="{{.ID}}">
+  <button id="language" type="button">English</button>
+  <h1 id="title">网关升级</h1>
+  <p class="versions">{{.Source}} → {{.Target}}</p>
+  <p id="hint">升级任务在服务器独立运行。刷新或关闭页面不会取消升级，维护期间网关可能暂时不可用。</p>
+  <div class="step" id="step" role="status" aria-live="polite">正在获取进度…</div>
+  <p id="result"></p>
+  <p class="meta"><span id="elapsed-label">已用时</span> <span id="elapsed">—</span></p>
+  <p class="meta">{{.ID}}</p>
+  <a href="/admin/dashboard" id="back">返回后台</a>
+</main>
+<script nonce="{{.Nonce}}">
+(() => {
+  const jobId = document.querySelector('main').dataset.job;
+  let language = localStorage.getItem('kano-update-language') === 'en' ? 'en' : 'zh';
+  let latest = null;
+  const messages = {
+    zh: {title:'网关升级',hint:'升级任务在服务器独立运行。刷新或关闭页面不会取消升级，维护期间网关可能暂时不可用。',elapsed:'已用时',back:'返回后台',waiting:'正在获取进度…',reconnect:'正在重新连接进度服务…',expired:'进度访问已到期，请从管理员版本菜单重新打开。',queued:'升级已排队',pulling:'正在拉取并校验新镜像',preflight:'正在检查运行状态和可用空间',backing_up:'维护中：正在保存完整备份',restoring:'维护中：正在隔离恢复备份',verifying:'维护中：正在验证迁移和原业务数据',switching:'维护中：正在切换应用版本',checking:'维护中：正在检查新版运行状态',rolling_back:'维护中：正在恢复更新前版本和数据',succeeded:'升级完成，网关已恢复服务',failed:'升级未执行，旧版继续服务',failed_rolled_back:'升级失败，旧版与数据已恢复',needs_attention:'恢复需要管理员处理，网关保持维护状态',attention:'请检查服务器上的升级任务诊断记录。完整备份已保留；不要在处理完成前重新启动升级。'},
+    en: {title:'Gateway upgrade',hint:'The task runs independently on the server. Refreshing or closing this page will not cancel it. The gateway may be unavailable during maintenance.',elapsed:'Elapsed',back:'Back to administration',waiting:'Loading progress…',reconnect:'Reconnecting to the progress service…',expired:'Progress access expired. Reopen it from the administrator version menu.',queued:'Upgrade queued',pulling:'Pulling and verifying the new image',preflight:'Checking deployment and free space',backing_up:'Maintenance: creating a complete backup',restoring:'Maintenance: restoring the backup in isolation',verifying:'Maintenance: checking migrations and original business data',switching:'Maintenance: switching the application version',checking:'Maintenance: checking the new deployment',rolling_back:'Maintenance: restoring the previous image and data',succeeded:'Upgrade complete; gateway available',failed:'Upgrade did not proceed; previous version available',failed_rolled_back:'Upgrade failed; previous version and data restored',needs_attention:'Recovery needs administrator attention; maintenance remains active',attention:'Inspect the protected updater diagnostics on the server. Complete backups are retained. Do not start another upgrade until recovery is complete.'}
+  };
+  function render() {
+    const text = messages[language];
+    document.documentElement.lang = language === 'zh' ? 'zh-CN' : 'en';
+    document.getElementById('title').textContent = text.title;
+    document.getElementById('hint').textContent = text.hint;
+    document.getElementById('elapsed-label').textContent = text.elapsed;
+    document.getElementById('back').textContent = text.back;
+    document.getElementById('language').textContent = language === 'zh' ? 'English' : '中文';
+    const step = document.getElementById('step');
+    step.textContent = latest ? (text[latest.status] || text.waiting) : text.waiting;
+    step.className = 'step' + (latest && latest.status === 'succeeded' ? ' done' : latest && ['failed','failed_rolled_back','needs_attention'].includes(latest.status) ? ' error' : '');
+    document.getElementById('result').textContent = latest && latest.status === 'needs_attention' ? text.attention : '';
+    if (latest) {
+      const terminal = ['succeeded','failed','failed_rolled_back','needs_attention'].includes(latest.status);
+      const end = terminal ? new Date(latest.updated_at).getTime() : Date.now();
+      const seconds = Math.max(0, Math.floor((end - new Date(latest.created_at).getTime()) / 1000));
+      document.getElementById('elapsed').textContent = Math.floor(seconds/60) + 'm ' + seconds%60 + 's';
+    }
+  }
+  document.getElementById('language').addEventListener('click', () => {language = language === 'zh' ? 'en' : 'zh';localStorage.setItem('kano-update-language', language);render();});
+  async function poll() {
+    try {
+      const response = await fetch('/kano-updates/' + jobId + '/status', {credentials:'same-origin',cache:'no-store'});
+      if (response.status === 403) {document.getElementById('step').textContent = messages[language].expired;return;}
+      if (!response.ok) throw new Error('unavailable');
+      latest = await response.json();render();
+      if (['succeeded','failed','failed_rolled_back','needs_attention'].includes(latest.status)) return;
+    } catch {document.getElementById('step').textContent = messages[language].reconnect;}
+    setTimeout(poll, 2000);
+  }
+  render();poll();
+})();
+</script></body></html>

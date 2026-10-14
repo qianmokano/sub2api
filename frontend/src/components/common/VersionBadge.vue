@@ -115,7 +115,12 @@
               </div>
 
               <!-- Priority 1: Update error (must check before hasUpdate) -->
-              <div v-if="updateError" class="space-y-2">
+              <ContainerUpgradePanel
+                v-if="isContainerBuild"
+                :info="appStore.versionInfo || null"
+                @refresh="refreshVersion(true)"
+              />
+              <div v-else-if="updateError" class="space-y-2">
                 <div
                   class="flex items-center gap-3 rounded-lg border border-red-200 bg-red-50 p-3 dark:border-red-800/50 dark:bg-red-900/20"
                 >
@@ -649,6 +654,7 @@ import {
   type RollbackVersionInfo
 } from '@/api/admin/system'
 import { useClipboard } from '@/composables/useClipboard'
+import ContainerUpgradePanel from './ContainerUpgradePanel.vue'
 import { formatVersion } from '@/utils/version'
 import Icon from '@/components/icons/Icon.vue'
 
@@ -730,7 +736,11 @@ const activeManualCommand = computed(() =>
 )
 
 // Only show update check for release builds (binary/docker deployment)
-const isReleaseBuild = computed(() => buildType.value === 'release' && !currentVersion.value.includes('-kano.'))
+const isContainerBuild = computed(
+  () => buildType.value === 'kano-container' || currentVersion.value.includes('-kano.') ||
+    /^v?\d+\.\d+\.\d+-[1-9]\d*$/.test(currentVersion.value)
+)
+const isReleaseBuild = computed(() => buildType.value === 'release' && !isContainerBuild.value)
 
 function toggleDropdown() {
   dropdownOpen.value = !dropdownOpen.value

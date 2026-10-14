@@ -19,6 +19,46 @@ export interface VersionInfo {
   cached: boolean
   warning?: string
   build_type: string // "source" for manual builds, "release" for CI builds
+  update_mode?: 'container'
+  updater_ready?: boolean
+  updater_version?: string
+  update_busy?: boolean
+  target_image_digest?: string
+  unavailable_reason?: string
+}
+
+export interface ContainerUpdateJob {
+  operation_id: string
+  source_version: string
+  target_version: string
+  status: string
+  message: string
+  created_at: string
+  updated_at: string
+}
+
+export interface ContainerUpdateResult {
+  job: ContainerUpdateJob | null
+  operation_id?: string
+  progress_url?: string
+}
+
+export async function startContainerUpdate(
+  version: string,
+  expectedDigest: string,
+  idempotencyKey: string
+): Promise<ContainerUpdateResult> {
+  const { data } = await apiClient.post<ContainerUpdateResult>(
+    '/admin/system/update',
+    { version, expected_digest: expectedDigest },
+    { headers: { 'Idempotency-Key': idempotencyKey }, timeout: 45000 }
+  )
+  return data
+}
+
+export async function currentContainerUpdate(): Promise<ContainerUpdateResult> {
+  const { data } = await apiClient.get<ContainerUpdateResult>('/admin/system/update-job', { timeout: 45000 })
+  return data
 }
 
 /**

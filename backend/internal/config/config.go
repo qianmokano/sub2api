@@ -187,7 +187,9 @@ type UpdateConfig struct {
 	// ProxyURL 用于访问 GitHub 的代理地址
 	// 支持 http/https/socks5/socks5h 协议
 	// 例如: "http://127.0.0.1:7890", "socks5://127.0.0.1:1080"
-	ProxyURL string `mapstructure:"proxy_url"`
+	ProxyURL         string `mapstructure:"proxy_url"`
+	ContainerEnabled bool   `mapstructure:"container_enabled"`
+	SocketPath       string `mapstructure:"socket_path"`
 }
 
 type IdempotencyConfig struct {
@@ -2577,6 +2579,8 @@ func setEnvReachableDefaults() {
 	viper.SetDefault("gateway.session_idle_timeout_minutes", 0)
 	viper.SetDefault("gateway.user_message_queue.mode", "")
 	viper.SetDefault("update.proxy_url", "")
+	viper.SetDefault("update.container_enabled", false)
+	viper.SetDefault("update.socket_path", "/run/kano-updater/control/agent.sock")
 
 	// sticky_escape_enabled is the one exception to the zero-value rule: its
 	// effective default is true, applied post-unmarshal via a viper.IsSet guard.

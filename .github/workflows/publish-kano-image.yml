@@ -59,6 +59,10 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
@@ -86,11 +90,27 @@ jobs:
             org.opencontainers.image.version=${{ github.ref_name }}
           cache-from: type=gha,scope=kano-image
           cache-to: type=gha,mode=max,scope=kano-image
+      - name: Build updater packages and verified manifest
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+          IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/kano-assets"
+          for architecture in amd64 arm64; do
+            package_dir="$RUNNER_TEMP/kano-updater-$architecture"
+            mkdir -p "$package_dir"
+            (cd backend && CGO_ENABLED=0 GOOS=linux GOARCH="$architecture" go build -trimpath -ldflags='-s -w' -o "$package_dir/kano-updater" ./cmd/kano-updater)
+            cp deploy/kano-updater/config.example.json deploy/kano-updater/kano-updater.service deploy/kano-updater/install.sh deploy/KANO-UPDATER.md "$package_dir/"
+            chmod 755 "$package_dir/install.sh"
+            tar -C "$package_dir" -czf "$RUNNER_TEMP/kano-assets/kano-updater-linux-$architecture.tar.gz" .
+          done
+          (cd backend && go run ./cmd/kano-updater manifest --migrations migrations --policy ../deploy/kano-upgrade-policy.json --version "$RELEASE_TAG" --digest "$IMAGE_DIGEST" --revision "$GITHUB_SHA") > "$RUNNER_TEMP/kano-assets/kano-update.json"
+          (cd "$RUNNER_TEMP/kano-assets" && sha256sum kano-update.json kano-updater-linux-amd64.tar.gz kano-updater-linux-arm64.tar.gz > checksums.txt)
       - name: Publish release record
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ github.ref_name }}
           IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
         run: |
-          printf 'Image: `ghcr.io/qianmokano/sub2api:%s`\n\nDigest: `%s`\n\nSee deploy/KANO-SSO.md for configuration, backup, rollback and upstream synchronization.\n' "$RELEASE_TAG" "$IMAGE_DIGEST" > "$RUNNER_TEMP/kano-release.md"
-          gh release create "$RELEASE_TAG" --verify-tag --title "$RELEASE_TAG" --notes-file "$RUNNER_TEMP/kano-release.md"
+          printf 'Image: `ghcr.io/qianmokano/sub2api:%s`\n\nDigest: `%s`\n\nIncludes the verified update manifest and native host updater packages. See deploy/KANO-UPDATER.md for installation, complete backup/restore validation and recovery; deploy/KANO-SSO.md covers authentication and upstream synchronization.\n' "$RELEASE_TAG" "$IMAGE_DIGEST" > "$RUNNER_TEMP/kano-release.md"
+          gh release create "$RELEASE_TAG" "$RUNNER_TEMP/kano-assets/"* --verify-tag --title "$RELEASE_TAG" --notes-file "$RUNNER_TEMP/kano-release.md"
