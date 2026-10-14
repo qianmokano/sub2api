@@ -48,6 +48,7 @@ try {
   const compliance = await context.request.get(`${origin}/api/v1/admin/compliance`, { headers: authorization })
   assert.equal(compliance.status(), 200)
   const { data: declaration } = await compliance.json()
+  let expectedAudits = 2 // Initial fixture login and this browser login.
   if (declaration.required) {
     const accepted = await context.request.post(`${origin}/api/v1/admin/compliance/accept`, {
       headers: authorization,
@@ -55,6 +56,7 @@ try {
     })
     assert.equal(accepted.status(), 200)
     assert.equal((await accepted.json()).data.required, false)
+    expectedAudits++
   }
   await context.addInitScript(session => {
     localStorage.setItem('auth_token', session.access_token)
@@ -75,7 +77,7 @@ try {
   })
   assert.equal(await button.isEnabled(), true)
   await page.screenshot({ path: path.join(artifacts, 'upgrade-button.png'), fullPage: true })
-  assert.equal((await context.request.get(`${origin}/fixture/baseline`, { timeout: 120_000 })).status(), 200)
+  assert.equal((await context.request.get(`${origin}/fixture/baseline?expected_audits=${expectedAudits}`, { timeout: 120_000 })).status(), 200)
   // Capture the real response before handing it to the page: the application
   // immediately navigates away and Chromium can discard its response body.
   let accepted

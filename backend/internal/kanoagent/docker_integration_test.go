@@ -17,6 +17,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -369,6 +370,15 @@ func fixtureAdminSession(t *testing.T, engine *Engine) string {
 	}
 	require.NoError(t, json.NewDecoder(response.Body).Decode(&envelope))
 	require.NotEmpty(t, envelope.Data.Token)
+	// Login audit writes are asynchronous. Seed/freeze only after the test's
+	// initial login has been persisted, otherwise a normal delayed audit row
+	// can appear as an unrelated database change in a later failure scenario.
+	postgres, err := engine.container(context.Background(), "postgres")
+	require.NoError(t, err)
+	require.Eventually(t, func() bool {
+		count, readErr := engine.pg(context.Background(), postgres, "SELECT COUNT(*) FROM audit_logs WHERE method='POST' AND path='/api/v1/auth/login' AND status_code=200")
+		return readErr == nil && count == "1"
+	}, 10*time.Second, 100*time.Millisecond)
 	return envelope.Data.Token
 }
 
@@ -479,6 +489,12 @@ func TestKanoUpdaterDockerLifecycle(t *testing.T) {
 			require.NoError(t, err)
 			after, err := engine.database(context.Background(), postgres, &before)
 			require.NoError(t, err)
+			for table, original := range before.Tables {
+				actual := after.Tables[table]
+				if original.Count != actual.Count || original.Digest != actual.Digest {
+					t.Logf("scenario=%s table=%s snapshot_rows=%d final_rows=%d", fault, table, original.Count, actual.Count)
+				}
+			}
 			require.NoError(t, CompareDatabase(before, after, manifest, false))
 			require.NoError(t, engine.billing(context.Background(), key))
 			verifyFixtureAdminSession(t, engine, adminToken)
@@ -573,6 +589,25 @@ func TestKanoUpdaterDockerBrowser(t *testing.T) {
 			if captureErr != nil {
 				w.WriteHeader(500)
 				return
+			}
+			expectedAudits, parseErr := strconv.Atoi(r.URL.Query().Get("expected_audits"))
+			if parseErr != nil || expectedAudits < 2 || expectedAudits > 3 {
+				w.WriteHeader(400)
+				return
+			}
+			waitCtx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+			defer cancel()
+			for {
+				count, readErr := engine.pg(waitCtx, postgres, "SELECT COUNT(*) FROM audit_logs")
+				if readErr == nil && count == strconv.Itoa(expectedAudits) {
+					break
+				}
+				select {
+				case <-waitCtx.Done():
+					w.WriteHeader(500)
+					return
+				case <-time.After(100 * time.Millisecond):
+				}
 			}
 			captured, captureErr := engine.database(r.Context(), postgres, nil)
 			if captureErr != nil {
