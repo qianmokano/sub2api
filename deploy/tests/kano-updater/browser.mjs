@@ -69,16 +69,27 @@ try {
   await panel.waitFor()
   const button = panel.getByRole('button', { name: 'Upgrade', exact: true })
   await button.waitFor()
+  await page.waitForFunction(() => {
+    const button = document.querySelector('[data-testid="container-upgrade"] button')
+    return button && !button.disabled
+  })
   assert.equal(await button.isEnabled(), true)
   await page.screenshot({ path: path.join(artifacts, 'upgrade-button.png'), fullPage: true })
-  const accepted = page.waitForResponse(response => response.request().method() === 'POST' && response.url().endsWith('/api/v1/admin/system/update'))
+  // Capture the real response before handing it to the page: the application
+  // immediately navigates away and Chromium can discard its response body.
+  let accepted
+  await page.route('**/api/v1/admin/system/update', async route => {
+    const response = await route.fetch()
+    accepted = { status: response.status(), body: await response.json() }
+    await route.fulfill({ response })
+  })
   await button.click()
-  const response = await accepted
-  assert.equal(response.status(), 202)
-  const { data: job } = await response.json()
+  await page.waitForURL(new RegExp(`${origin}/kano-updates/up-[a-f0-9]{32}$`))
+  assert.equal(accepted.status, 202)
+  const { data: job } = accepted.body
   assert.match(job.progress_url, /^\/kano-updates\/up-[a-f0-9]{32}$/)
   assert.equal(JSON.stringify(job).includes('capability'), false)
-  await page.waitForURL(`${origin}${job.progress_url}`)
+  assert.equal(page.url(), `${origin}${job.progress_url}`)
   const cookie = (await context.cookies()).find(item => item.path === job.progress_url)
   assert.ok(cookie && cookie.secure && cookie.httpOnly && cookie.sameSite === 'Strict')
   assert.equal(await page.evaluate(() => document.cookie.includes('kano_update_')), false)
