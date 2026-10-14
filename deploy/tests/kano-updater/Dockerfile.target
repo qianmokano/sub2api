@@ -1,0 +1,7 @@
+FROM ghcr.io/qianmokano/sub2api:v0.2.16-1
+ARG SERVER_FILE=server
+ARG FIXTURE_VERSION=v0.2.16-2
+COPY --chown=1000:1000 ${SERVER_FILE} /app/sub2api
+LABEL org.opencontainers.image.source="https://github.com/qianmokano/sub2api"
+LABEL org.opencontainers.image.version="${FIXTURE_VERSION}"
+LABEL org.opencontainers.image.revision="1111111111111111111111111111111111111111"

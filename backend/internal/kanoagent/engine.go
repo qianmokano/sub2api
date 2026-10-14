@@ -189,6 +189,9 @@ func (e *Engine) Execute(ctx context.Context, store *Store, job *Job) (err error
 	if _, err = e.compose(ctx, "start", "postgres", "redis"); err != nil {
 		return err
 	}
+	if err = e.waitDependencies(ctx); err != nil {
+		return err
+	}
 	if _, err = e.compose(ctx, "up", "-d", "--no-deps", "sub2api"); err != nil {
 		return err
 	}
@@ -433,7 +436,7 @@ func (e *Engine) isolatedRestore(ctx context.Context, state *UpgradeState, manif
 		return err
 	}
 	postgres := state.Snapshot.Containers["postgres"]
-	pgdata := postgres.Environment()["PGDATA"]
+	pgdata := state.Snapshot.PostgresData
 	if pgdata == "" {
 		return errors.New("PostgreSQL data location is missing")
 	}
@@ -762,11 +765,23 @@ func (e *Engine) recover(ctx context.Context, store *Store, job *Job, state *Upg
 				return errors.New("recovered original files differ from the cold backup")
 			}
 		}
-		if _, err = e.compose(ctx, "up", "-d"); err != nil {
+		if _, err = e.compose(ctx, "up", "-d", "postgres", "redis"); err != nil {
+			return err
+		}
+		if err = e.waitDependencies(ctx); err != nil {
+			return err
+		}
+		if _, err = e.compose(ctx, "up", "-d", "--no-deps", "sub2api"); err != nil {
 			return err
 		}
 	} else {
-		if _, err = e.compose(ctx, "start"); err != nil {
+		if _, err = e.compose(ctx, "start", "postgres", "redis"); err != nil {
+			return err
+		}
+		if err = e.waitDependencies(ctx); err != nil {
+			return err
+		}
+		if _, err = e.compose(ctx, "start", "sub2api"); err != nil {
 			return err
 		}
 	}
@@ -784,6 +799,21 @@ func (e *Engine) recover(ctx context.Context, store *Store, job *Job, state *Upg
 		return err
 	}
 	return store.Update(ctx, job.ID, FailedRolledBack, "Upgrade failed; previous version and data restored")
+}
+
+func (e *Engine) waitDependencies(ctx context.Context) error {
+	postgres, err := e.container(ctx, "postgres")
+	if err != nil {
+		return err
+	}
+	if err = e.waitPostgres(ctx, postgres); err != nil {
+		return err
+	}
+	redisContainer, err := e.container(ctx, "redis")
+	if err != nil {
+		return err
+	}
+	return e.redisBackend().Ready(ctx, redisContainer, redisContainer)
 }
 
 func (e *Engine) validateCheckpoint(job *Job, state *UpgradeState) error {

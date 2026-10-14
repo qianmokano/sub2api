@@ -95,3 +95,39 @@ func TestRuntimeRejectsSymlinkAndGuardsRecoveryPaths(t *testing.T) {
 	before.Migrations["241_sso_issuer_independence.sql"] = "known-historical-checksum"
 	require.NoError(t, CompareDatabase(before, after, validManifest(), false))
 }
+
+func TestRuntimeVerificationRejectsChangedCredentialsMountsAndDependencies(t *testing.T) {
+	for _, fault := range []string{"environment", "command", "mount", "port", "dependency", "stopped", "version"} {
+		t.Run(fault, func(t *testing.T) {
+			e, _, _, f := newDeploymentFixture(t, "")
+			snapshot, err := e.snapshotRuntime(context.Background())
+			require.NoError(t, err)
+			body, err := json.Marshal(f.containers["sub2api"])
+			require.NoError(t, err)
+			var app Container
+			require.NoError(t, json.Unmarshal(body, &app))
+			manifest := validManifest()
+			app.Config.Labels = map[string]string{"org.opencontainers.image.version": manifest.Version, "org.opencontainers.image.revision": manifest.Revision}
+			switch fault {
+			case "environment":
+				app.Config.Env = append(app.Config.Env, "JWT_SECRET=changed")
+			case "command":
+				app.Config.Cmd = []string{"different-command"}
+			case "mount":
+				app.Mounts[0].Source = "/another-data-directory"
+			case "port":
+				app.HostConfig["PortBindings"] = map[string]any{"8080/tcp": "0.0.0.0"}
+			case "dependency":
+				postgres := f.containers["postgres"]
+				postgres.ID = "replaced-dependency"
+				f.containers["postgres"] = postgres
+			case "stopped":
+				app.State.Running = false
+			case "version":
+				app.Config.Labels["org.opencontainers.image.version"] = "v0.2.16-1"
+			}
+			f.containers["sub2api"] = app
+			require.Error(t, e.verifyRuntime(context.Background(), &UpgradeState{Snapshot: snapshot}, manifest))
+		})
+	}
+}

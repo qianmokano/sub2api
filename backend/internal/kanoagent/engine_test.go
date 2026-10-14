@@ -88,7 +88,8 @@ func (f *deploymentFixture) Snapshot(_ context.Context, c, identity Container) (
 	}
 	return value, nil
 }
-func (f *deploymentFixture) Save(context.Context, Container) error { return nil }
+func (f *deploymentFixture) Save(context.Context, Container) error             { return nil }
+func (f *deploymentFixture) Ready(context.Context, Container, Container) error { return nil }
 
 func (f *deploymentFixture) Run(ctx context.Context, args []string, input io.Reader, output io.Writer) ([]byte, error) {
 	if args[0] != "docker" {
@@ -225,6 +226,8 @@ func (f *deploymentFixture) Run(ctx context.Context, args []string, input io.Rea
 	query := args[len(args)-1]
 	private := strings.Contains(joined, "kano-verify-")
 	switch {
+	case query == "SHOW data_directory":
+		return []byte("/data/18/docker"), nil
 	case strings.Contains(query, "pg_database_size"):
 		if f.fault == "disk" {
 			return []byte("9223372036854775807"), nil
@@ -354,4 +357,30 @@ func TestHealthRejectsRedirectAndCancelledReadiness(t *testing.T) {
 	require.NoError(t, e.billing(ctx, ""))
 	require.False(t, validHealth([]byte(`{"status":"error"}`)))
 	require.False(t, validHealth([]byte(`invalid`)))
+}
+
+func TestExecuteRechecksReleaseBeforeStoppingApplication(t *testing.T) {
+	for _, fault := range []string{"unavailable", "missing", "manifest", "changed"} {
+		t.Run(fault, func(t *testing.T) {
+			e, store, job, f := newDeploymentFixture(t, "")
+			source, ok := e.Source.(*fakeSource)
+			require.True(t, ok)
+			switch fault {
+			case "unavailable":
+				source.err = errors.New("release unavailable")
+			case "missing":
+				source.release = nil
+			case "manifest":
+				source.release.Manifest = nil
+			case "changed":
+				source.release.Manifest.Revision = strings.Repeat("f", 40)
+			}
+			require.Error(t, e.Execute(context.Background(), store, job))
+			current, err := store.Get(context.Background(), job.ID)
+			require.NoError(t, err)
+			require.Equal(t, Failed, current.Status)
+			require.NoFileExists(t, e.Config.MaintenanceFile)
+			require.True(t, f.containers["sub2api"].State.Running)
+		})
+	}
 }

@@ -93,3 +93,50 @@ jobs:
       - run: python -m pip install -r .github/release-tools/requirements-release.txt
       - run: python -m unittest discover -s .github/release-tools -p 'test_release_matrix.py'
       - run: bash -n .github/release-tools/release-images.sh
+
+  kano-updater:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Updater race tests and coverage
+        working-directory: backend
+        run: |
+          go test -race -tags=unit -coverpkg=./internal/kanoagent,./internal/kanoupdate -coverprofile="$RUNNER_TEMP/kano.cover" ./internal/kanoagent ./internal/kanoupdate ./cmd/kano-updater
+          go tool cover -func="$RUNNER_TEMP/kano.cover" | awk '/^total:/ { if ($3+0 < 80) exit 1; found=1 } END { if (!found) exit 1 }'
+          if go list -deps ./cmd/server | grep -q '/internal/kanoagent$'; then
+            echo 'Application must not import the privileged host executor.' >&2
+            exit 1
+          fi
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - name: Build actual frontend for browser fixture
+        working-directory: frontend
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm run build
+      - name: Install Chromium test runtime
+        run: |
+          npm install --prefix "$RUNNER_TEMP/kano-browser" playwright@1.62.1
+          "$RUNNER_TEMP/kano-browser/node_modules/.bin/playwright" install --with-deps chromium
+      - name: Real Docker fault matrix and HTTPS browser upgrade
+        env:
+          KANO_BROWSER_MODULE_ROOT: ${{ runner.temp }}/kano-browser
+          KANO_BROWSER_ARTIFACTS: ${{ runner.temp }}/kano-browser-artifacts
+        run: bash deploy/tests/kano-updater/run.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: kano-updater-browser
+          path: ${{ runner.temp }}/kano-browser-artifacts
+          if-no-files-found: ignore

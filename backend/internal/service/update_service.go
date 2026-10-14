@@ -19,6 +19,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/kanoupdate"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 )
 
@@ -62,10 +63,11 @@ type GitHubReleaseClient interface {
 
 // UpdateService handles software updates
 type UpdateService struct {
-	cache          UpdateCache
-	githubClient   GitHubReleaseClient
-	currentVersion string
-	buildType      string // "source" for manual builds, "release" for CI builds
+	cache            UpdateCache
+	githubClient     GitHubReleaseClient
+	currentVersion   string
+	buildType        string // "source" for manual builds, "release" for CI builds
+	containerUpdater ContainerUpdater
 }
 
 // NewUpdateService creates a new UpdateService
@@ -80,13 +82,19 @@ func NewUpdateService(cache UpdateCache, githubClient GitHubReleaseClient, versi
 
 // UpdateInfo contains update information
 type UpdateInfo struct {
-	CurrentVersion string       `json:"current_version"`
-	LatestVersion  string       `json:"latest_version"`
-	HasUpdate      bool         `json:"has_update"`
-	ReleaseInfo    *ReleaseInfo `json:"release_info,omitempty"`
-	Cached         bool         `json:"cached"`
-	Warning        string       `json:"warning,omitempty"`
-	BuildType      string       `json:"build_type"` // "source" or "release"
+	CurrentVersion    string       `json:"current_version"`
+	LatestVersion     string       `json:"latest_version"`
+	HasUpdate         bool         `json:"has_update"`
+	ReleaseInfo       *ReleaseInfo `json:"release_info,omitempty"`
+	Cached            bool         `json:"cached"`
+	Warning           string       `json:"warning,omitempty"`
+	BuildType         string       `json:"build_type"` // "source" or "release"
+	UpdateMode        string       `json:"update_mode,omitempty"`
+	UpdaterReady      bool         `json:"updater_ready"`
+	UpdaterVersion    string       `json:"updater_version,omitempty"`
+	UpdateBusy        bool         `json:"update_busy"`
+	TargetImageDigest string       `json:"target_image_digest,omitempty"`
+	UnavailableReason string       `json:"unavailable_reason,omitempty"`
 }
 
 // ReleaseInfo contains GitHub release details
@@ -133,8 +141,7 @@ type GitHubAsset struct {
 // CheckUpdate checks for available updates
 func (s *UpdateService) CheckUpdate(ctx context.Context, force bool) (*UpdateInfo, error) {
 	if s.isManagedFork() {
-		return &UpdateInfo{CurrentVersion: s.currentVersion, LatestVersion: s.currentVersion, BuildType: "kano-container",
-			Warning: "kano fork updates are published through https://github.com/qianmokano/sub2api/releases"}, nil
+		return s.checkContainerUpdate(ctx, force), nil
 	}
 	// Try cache first
 	if !force {
@@ -378,7 +385,7 @@ func (s *UpdateService) RollbackToVersion(ctx context.Context, version string) e
 }
 
 func (s *UpdateService) isManagedFork() bool {
-	return s.buildType == "kano-container" || strings.Contains(s.currentVersion, "-kano.")
+	return s.buildType == "kano-container" || strings.Contains(s.currentVersion, "-kano.") || kanoupdate.ValidReleaseVersion("v"+strings.TrimPrefix(s.currentVersion, "v"))
 }
 
 // fetchRollbackCandidates fetches recent releases and keeps the newest

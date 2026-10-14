@@ -53,6 +53,7 @@ func TestNativeRedisSnapshotsEveryDatabaseAndSavesWithoutChangingValues(t *testi
 		require.NoError(t, client.Close())
 	}
 	backend := nativeRedis{}
+	require.NoError(t, backend.Ready(ctx, container, container))
 	before, err := backend.Snapshot(ctx, container, container)
 	require.NoError(t, err)
 	require.Len(t, before, 2)

@@ -19,6 +19,27 @@ export default {
 
   // Version Badge
   version: {
+    containerHint: '每次升级都会完成备份和实际恢复验证，期间服务可能短暂不可用。',
+    updaterUnavailable: '主机更新服务尚未接入，暂不可在线升级。',
+    updaterReady: '更新服务已就绪。',
+    upgradeNow: '升级',
+    submittingUpgrade: '正在创建升级任务…',
+    viewProgress: '查看升级进度',
+    jobStatus: {
+      queued: '等待执行',
+      pulling: '拉取镜像',
+      preflight: '检查部署',
+      backing_up: '创建完整备份',
+      restoring: '验证恢复',
+      verifying: '验证迁移',
+      switching: '切换版本',
+      checking: '检查服务',
+      rolling_back: '恢复旧版本',
+      succeeded: '升级完成',
+      failed: '升级未执行',
+      failed_rolled_back: '旧版本与数据已恢复',
+      needs_attention: '需要管理员处理'
+    },
     currentVersion: '当前版本',
     latestVersion: '最新版本',
     upToDate: '已是最新版本',

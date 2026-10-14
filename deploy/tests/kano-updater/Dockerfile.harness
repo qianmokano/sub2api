@@ -1,0 +1,5 @@
+FROM docker:28-cli
+RUN apk add --no-cache coreutils nginx openssl curl
+COPY agent-integration.test /usr/local/bin/agent-integration.test
+COPY kano-upgrade-policy.json /usr/local/share/kano-upgrade-policy.json
+ENTRYPOINT ["/usr/local/bin/agent-integration.test"]

@@ -43,6 +43,7 @@ export const useAppStore = defineStore('app', () => {
   const hasUpdate = ref<boolean>(false)
   const buildType = ref<string>('source')
   const releaseInfo = ref<ReleaseInfo | null>(null)
+  const versionInfo = ref<VersionInfo | null>(null)
 
   // Auto-incrementing ID for toasts
   let toastIdCounter = 0
@@ -244,6 +245,7 @@ export const useAppStore = defineStore('app', () => {
     // Return cached data if available and not forcing refresh
     if (versionLoaded.value && !force) {
       return {
+        ...versionInfo.value,
         current_version: currentVersion.value,
         latest_version: latestVersion.value,
         has_update: hasUpdate.value,
@@ -261,6 +263,7 @@ export const useAppStore = defineStore('app', () => {
     versionLoading.value = true
     try {
       const data = await checkUpdatesAPI(force)
+      versionInfo.value = data
       currentVersion.value = data.current_version
       latestVersion.value = data.latest_version
       hasUpdate.value = data.has_update
@@ -460,6 +463,7 @@ export const useAppStore = defineStore('app', () => {
     hasUpdate,
     buildType,
     releaseInfo,
+    versionInfo,
 
     // Computed
     hasActiveToasts,

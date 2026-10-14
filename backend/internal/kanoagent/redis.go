@@ -26,9 +26,19 @@ type RedisSnapshot []map[string]RedisEntry
 type RedisBackend interface {
 	Snapshot(context.Context, Container, Container) (RedisSnapshot, error)
 	Save(context.Context, Container) error
+	Ready(context.Context, Container, Container) error
 }
 
 type nativeRedis struct{}
+
+func (nativeRedis) Ready(ctx context.Context, container, identity Container) error {
+	client, err := redisClient(container, identity, 0)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = client.Close() }()
+	return waitRedis(ctx, client)
+}
 
 func (nativeRedis) Snapshot(ctx context.Context, container, identity Container) (RedisSnapshot, error) {
 	return snapshotRedis(ctx, container, identity)

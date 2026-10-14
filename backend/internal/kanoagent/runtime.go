@@ -166,6 +166,7 @@ func (c Container) Environment() map[string]string {
 }
 
 type RuntimeSnapshot struct {
+	PostgresData string               `json:"postgres_data"`
 	Compose      map[string]any       `json:"compose"`
 	Containers   map[string]Container `json:"containers"`
 	MountBackups map[string]string    `json:"mount_backups"`
@@ -291,6 +292,20 @@ func (e *Engine) snapshotRuntime(ctx context.Context) (*RuntimeSnapshot, error) 
 	if !strings.HasPrefix(pgEnv["PG_MAJOR"], "18") {
 		return nil, errors.New("online upgrade requires the existing PostgreSQL 18 deployment")
 	}
+	dataDirectory, dataErr := e.pg(ctx, result.Containers["postgres"], "SHOW data_directory")
+	if dataErr != nil {
+		return nil, dataErr
+	}
+	captured := false
+	for _, mount := range result.Containers["postgres"].Mounts {
+		if inside(dataDirectory, mount.Destination) {
+			captured = true
+		}
+	}
+	if !filepath.IsAbs(dataDirectory) || !captured {
+		return nil, errors.New("actual PostgreSQL data directory is not inside a captured mount")
+	}
+	result.PostgresData = dataDirectory
 	for _, info := range result.Containers {
 		for _, mount := range info.Mounts {
 			if e.managedMount(mount) {

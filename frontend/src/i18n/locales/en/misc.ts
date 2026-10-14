@@ -19,6 +19,27 @@ export default {
 
   // Version Badge
   version: {
+    containerHint: 'Each upgrade verifies a complete backup and restore. Service may be briefly unavailable.',
+    updaterUnavailable: 'The host updater is not connected. Online upgrade is unavailable.',
+    updaterReady: 'Host updater is ready.',
+    upgradeNow: 'Upgrade',
+    submittingUpgrade: 'Starting upgrade…',
+    viewProgress: 'View upgrade progress',
+    jobStatus: {
+      queued: 'Queued',
+      pulling: 'Pulling image',
+      preflight: 'Checking deployment',
+      backing_up: 'Creating backup',
+      restoring: 'Verifying restore',
+      verifying: 'Verifying migrations',
+      switching: 'Switching version',
+      checking: 'Checking service',
+      rolling_back: 'Restoring previous version',
+      succeeded: 'Upgrade complete',
+      failed: 'Upgrade did not proceed',
+      failed_rolled_back: 'Previous version and data restored',
+      needs_attention: 'Administrator action required'
+    },
     currentVersion: 'Current Version',
     latestVersion: 'Latest Version',
     upToDate: "You're running the latest version.",
