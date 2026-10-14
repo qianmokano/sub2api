@@ -44,7 +44,7 @@ docker run --rm --name "$fixture_id" \
   -e KANO_UPDATER_DOCKER_TEST=1 -e "KANO_TEST_HARNESS_CONTAINER=$fixture_id" \
   -e KANO_TEST_POLICY=/usr/local/share/kano-upgrade-policy.json \
   -e "KANO_DOCKER_FIXTURE_ROOT=$fixture_root" kano-updater-test:harness \
-  -test.run='^TestKanoUpdaterDockerLifecycle$' -test.v -test.timeout=40m
+  -test.run='^TestKanoUpdaterDocker(Lifecycle|BackgroundStartup)$' -test.v -test.timeout=40m
 docker build -f deploy/tests/kano-updater/Dockerfile.target --build-arg SERVER_FILE=server-1 --build-arg FIXTURE_VERSION=v0.2.16-1 -t kano-sub2api-test:base "$fixture_build"
 docker run --rm --name "$fixture_id" -p 127.0.0.1:19443:19443 \
   --mount type=bind,src=/var/run/docker.sock,dst=/var/run/docker.sock \

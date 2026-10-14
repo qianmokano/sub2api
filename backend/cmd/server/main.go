@@ -18,6 +18,7 @@ import (
 	_ "github.com/Wei-Shaw/sub2api/ent/runtime"
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/handler"
+	"github.com/Wei-Shaw/sub2api/internal/kanoupdate"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/setup"
@@ -147,12 +148,17 @@ func runMainServer() {
 		Version:   Version,
 		BuildType: BuildType,
 	}
+	stopStartup := func() {}
+	if cfg.Update.ContainerEnabled {
+		stopStartup = kanoupdate.GuardBackgroundStartup(context.Background(), kanoupdate.NewClient(cfg.Update.SocketPath))
+	}
 
 	app, err := initializeApplication(buildInfo)
 	if err != nil {
 		log.Fatalf("Failed to initialize application: %v", err)
 	}
 	defer app.Cleanup()
+	defer stopStartup()
 	if app.PluginManager != nil {
 		if err := app.PluginManager.Start(context.Background()); err != nil {
 			log.Printf("Plugin manager started in degraded state: %v", err)
@@ -181,6 +187,7 @@ func runMainServer() {
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
+	stopStartup()
 
 	log.Println("Shutting down server...")
 

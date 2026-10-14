@@ -151,6 +151,15 @@ func (r *integrationRunner) Run(ctx context.Context, args []string, input io.Rea
 		if isTarget && r.fault == "health" {
 			time.AfterFunc(time.Second, r.cancelOperation)
 		}
+		if isTarget && r.fault == "background_startup" {
+			// Give an ungated metrics collector time to write before the frozen
+			// production comparison. The corrected application must stay paused.
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(5 * time.Second):
+			}
+		}
 	}
 	if !private && strings.Contains(joined, " up -d") && !strings.Contains(joined, "--no-deps") {
 		r.newHealth.Store(false)
@@ -273,6 +282,10 @@ func stopDockerWorker(command *exec.Cmd) {
 }
 
 func dockerFixture(t *testing.T) (Config, string, *Engine) {
+	return dockerFixtureEnvironment(t, nil)
+}
+
+func dockerFixtureEnvironment(t *testing.T, overrides map[string]string) (Config, string, *Engine) {
 	t.Helper()
 	parent := os.Getenv("KANO_DOCKER_FIXTURE_ROOT")
 	require.True(t, filepath.IsAbs(parent))
@@ -291,6 +304,9 @@ func dockerFixture(t *testing.T) (Config, string, *Engine) {
 		require.NoError(t, os.MkdirAll(filepath.Join(deployment, directory), 0o755))
 	}
 	appEnvironment := map[string]string{"AUTO_SETUP": "true", "ADMIN_EMAIL": integrationAdminEmail, "ADMIN_PASSWORD": integrationAdminPassword, "SERVER_PORT": "8080", "DATABASE_HOST": "postgres", "DATABASE_PORT": "5432", "DATABASE_USER": "sub2api", "DATABASE_PASSWORD": "fixture-postgres-password", "DATABASE_DBNAME": "sub2api", "DATABASE_SSLMODE": "disable", "REDIS_HOST": "redis", "REDIS_PORT": "6379", "REDIS_PASSWORD": "fixture-redis-password", "JWT_SECRET": strings.Repeat("b", 64), "TOTP_ENCRYPTION_KEY": strings.Repeat("c", 64), "OPS_ENABLED": "false", "DASHBOARD_AGGREGATION_ENABLED": "false", "USAGE_CLEANUP_ENABLED": "false", "TOKEN_REFRESH_ENABLED": "false", "GATEWAY_CN_PROVIDERS_BALANCE_CHECK_ENABLED": "false", "UPDATE_CONTAINER_ENABLED": "true", "UPDATE_SOCKET_PATH": "/run/kano-updater/control/agent.sock"}
+	for key, value := range overrides {
+		appEnvironment[key] = value
+	}
 	health := map[string]any{"test": []string{"CMD", "wget", "-q", "-T", "2", "-O", "/dev/null", "http://127.0.0.1:8080/health"}, "interval": "1s", "timeout": "3s", "retries": 120, "start_period": "5s"}
 	compose := map[string]any{"name": filepath.Base(root), "services": map[string]any{
 		"sub2api":  map[string]any{"image": "kano-sub2api-test:base", "environment": appEnvironment, "ports": []string{"127.0.0.1:19081:8080"}, "volumes": []string{filepath.Join(deployment, "app") + ":/app/data", filepath.Dir(config.ControlSocket) + ":/run/kano-updater/control:ro"}, "healthcheck": health, "networks": []string{"backend"}},
@@ -301,6 +317,11 @@ func dockerFixture(t *testing.T) (Config, string, *Engine) {
 	require.True(t, ok)
 	app, ok := services["sub2api"].(map[string]any)
 	require.True(t, ok)
+	if os.Getenv("KANO_TEST_HARNESS_CONTAINER") != "" {
+		// The harness proxy uses the application address on its private network.
+		// A host publication is unnecessary and can collide with another fixture.
+		delete(app, "ports")
+	}
 	app["depends_on"] = map[string]any{"postgres": map[string]string{"condition": "service_healthy"}, "redis": map[string]string{"condition": "service_healthy"}}
 	pg, ok := services["postgres"].(map[string]any)
 	require.True(t, ok)
@@ -310,7 +331,20 @@ func dockerFixture(t *testing.T) (Config, string, *Engine) {
 	redisService["healthcheck"] = map[string]any{"test": []string{"CMD", "redis-cli", "ping"}, "interval": "1s", "timeout": "3s", "retries": 90}
 	require.NoError(t, writePrivateJSON(config.ComposeFiles[0], compose))
 	engine := &Engine{Config: config, Runner: CommandRunner{DiagnosticDir: filepath.Join(config.StateDir, "parent-diagnostics")}}
-	t.Cleanup(func() { _, _ = engine.compose(context.Background(), "down", "--volumes", "--remove-orphans") })
+	t.Cleanup(func() {
+		if t.Failed() {
+			body, _ := engine.compose(context.Background(), "ps", "--all")
+			t.Logf("fixture container state: %s", body)
+			app, inspectErr := engine.container(context.Background(), "sub2api")
+			if inspectErr == nil {
+				body, _ = exec.Command("docker", "logs", "--tail", "80", app.ID).CombinedOutput()
+				t.Logf("fixture application log: %s", body)
+			} else {
+				t.Logf("fixture application inspection: %v", inspectErr)
+			}
+		}
+		_, _ = engine.compose(context.Background(), "down", "--volumes", "--remove-orphans")
+	})
 	return config, configPath, engine
 }
 
@@ -398,6 +432,81 @@ func progressUnixClient(socket string) *http.Client {
 	return &http.Client{Timeout: 10 * time.Second, Transport: &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 		return (&net.Dialer{}).DialContext(ctx, "unix", socket)
 	}}}
+}
+
+func TestKanoUpdaterDockerBackgroundStartup(t *testing.T) {
+	if os.Getenv("KANO_UPDATER_DOCKER_TEST") != "1" {
+		t.Skip("enable dedicated real Docker fixture")
+	}
+	require.Equal(t, "linux", runtime.GOOS)
+	require.Zero(t, os.Geteuid())
+	config, configPath, engine := dockerFixtureEnvironment(t, map[string]string{"OPS_ENABLED": "true"})
+	worker := startDockerWorker(t, configPath, "background_startup")
+	defer stopDockerWorker(worker)
+	client := kanoupdate.NewClient(config.ControlSocket)
+	require.Eventually(t, func() bool { _, err := client.Health(context.Background()); return err == nil }, 20*time.Second, 100*time.Millisecond)
+	_, err := engine.compose(context.Background(), "up", "-d")
+	require.NoError(t, err)
+	initialApp, err := engine.container(context.Background(), "sub2api")
+	require.NoError(t, err)
+	t.Logf("background fixture startup running=%v health=%s networks=%v", initialApp.State.Running, initialApp.State.Health.Status, sortedKeys(initialApp.NetworkSettings.Networks))
+	if harness := os.Getenv("KANO_TEST_HARNESS_CONTAINER"); harness != "" {
+		network := filepath.Base(filepath.Dir(config.DeploymentDir)) + "_backend"
+		_, err = engine.run(context.Background(), "docker", "network", "connect", network, harness)
+		require.NoError(t, err)
+		t.Cleanup(func() { _, _ = engine.run(context.Background(), "docker", "network", "disconnect", network, harness) })
+	}
+	waitFixtureHealth(t, engine)
+	postgres, err := engine.container(context.Background(), "postgres")
+	require.NoError(t, err)
+	require.Eventually(t, func() bool {
+		value, queryErr := engine.pg(context.Background(), postgres, "SELECT count(*) FROM ops_system_metrics")
+		return queryErr == nil && value != "0"
+	}, 30*time.Second, 100*time.Millisecond)
+	adminToken := fixtureAdminSession(t, engine)
+	_, key := seedDockerData(t, engine)
+	manifest := integrationManifest(t)
+	session, err := client.Start(context.Background(), StartRequest{Version: manifest.Version, ExpectedDigest: manifest.ImageDigest, Actor: "fixture-admin:1", IdempotencyKey: "background-startup"})
+	require.NoError(t, err)
+	store, err := OpenStore(config.StateDir)
+	require.NoError(t, err)
+	defer func() { _ = store.Close() }()
+	var final *Job
+	require.Eventually(t, func() bool {
+		job, queryErr := store.Get(context.Background(), session.Job.ID)
+		if queryErr != nil {
+			return false
+		}
+		final = job
+		return !job.Status.Active() || job.Status == NeedsAttention
+	}, 10*time.Minute, 200*time.Millisecond)
+	require.Equal(t, Succeeded, final.Status, "enabled production workers must not mutate the maintenance baseline")
+	var state UpgradeState
+	require.NoError(t, json.Unmarshal(final.State, &state))
+	require.True(t, state.PublicCommitted)
+	evidence, err := os.ReadFile(filepath.Join(state.BackupPath, "final-evidence.json"))
+	require.NoError(t, err)
+	var proof struct {
+		OldValues bool `json:"old_business_values_verified"`
+	}
+	require.NoError(t, json.Unmarshal(evidence, &proof))
+	require.True(t, proof.OldValues)
+	// Once the committed upgrade opens traffic, the original enabled collector
+	// must resume without a settings change, another restart or a manual action.
+	require.Eventually(t, func() bool {
+		value, queryErr := engine.pg(context.Background(), postgres, "SELECT count(*) FROM ops_system_metrics")
+		if queryErr != nil {
+			return false
+		}
+		count, parseErr := strconv.ParseInt(value, 10, 64)
+		return parseErr == nil && count > state.Snapshot.Database.Tables["ops_system_metrics"].Count
+	}, 30*time.Second, 100*time.Millisecond)
+	app, err := engine.container(context.Background(), "sub2api")
+	require.NoError(t, err)
+	require.Equal(t, "true", app.Environment()["OPS_ENABLED"])
+	require.NoFileExists(t, config.MaintenanceFile)
+	require.NoError(t, engine.billing(context.Background(), key))
+	verifyFixtureAdminSession(t, engine, adminToken)
 }
 
 func TestKanoUpdaterDockerLifecycle(t *testing.T) {
