@@ -117,6 +117,11 @@ apiClient.interceptors.response.use(
       // Validate `data` shape to avoid HTML error pages breaking our error handling.
       const apiData = (typeof data === 'object' && data !== null ? data : {}) as Record<string, any>
 
+      if (status === 503 && (error.response.headers['x-kano-maintenance'] === 'true' || apiData.error?.type === 'maintenance')) {
+        window.dispatchEvent(new Event('kano-maintenance-active'))
+        return Promise.reject({ status, code: 'MAINTENANCE', message: 'Service temporarily unavailable' })
+      }
+
       // Ops monitoring disabled: treat as feature-flagged 404, and proactively redirect away
       // from ops pages to avoid broken UI states.
       if (status === 404 && apiData.message === 'Ops monitoring is disabled') {

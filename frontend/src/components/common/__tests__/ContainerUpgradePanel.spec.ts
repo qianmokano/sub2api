@@ -3,7 +3,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import ContainerUpgradePanel from '../ContainerUpgradePanel.vue'
 import type { ContainerUpdateResult, VersionInfo } from '@/api/admin/system'
 
-const api = vi.hoisted(() => ({ currentContainerUpdate: vi.fn(), startContainerUpdate: vi.fn() }))
+const api = vi.hoisted(() => ({ currentContainerUpdate: vi.fn(), startContainerUpdate: vi.fn(), currentUpdateSchedule: vi.fn(), createUpdateSchedule: vi.fn(), cancelUpdateSchedule: vi.fn() }))
 vi.mock('@/api/admin/system', () => api)
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
 
@@ -104,6 +104,54 @@ describe('ContainerUpgradePanel', () => {
     expect(wrapper.text()).toContain('An upgrade is already running')
     expect(wrapper.get('button').attributes('disabled')).toBeDefined()
     expect(wrapper.get('a').attributes('rel')).toBe('noopener noreferrer')
+    wrapper.unmount()
+  })
+
+  it('confirms the host date and target, then publishes the reservation immediately', async () => {
+    const at = '2026-10-17T20:00:00Z'
+    api.currentUpdateSchedule.mockResolvedValue({ job: null })
+    api.createUpdateSchedule.mockResolvedValue({ ...progress('scheduled'), job: { ...progress('scheduled').job, scheduled_at: at, preparation: 'pending' } })
+    const listener = vi.fn()
+    window.addEventListener('kano-maintenance-refresh', listener)
+    const wrapper = mount(ContainerUpgradePanel, { props: { info: { ...info(), schedule_ready: true, next_scheduled_at: at } } })
+    await flushPromises()
+    await wrapper.get('[data-testid="schedule-upgrade"]').trigger('click')
+    expect(api.createUpdateSchedule).not.toHaveBeenCalled()
+    expect(wrapper.findComponent({ name: 'ConfirmDialog' }).props('show')).toBe(true)
+    wrapper.findComponent({ name: 'ConfirmDialog' }).vm.$emit('confirm')
+    await flushPromises()
+    expect(api.createUpdateSchedule).toHaveBeenCalledWith(info().latest_version, info().target_image_digest, at, expect.any(String))
+    expect(listener).toHaveBeenCalledTimes(1)
+    expect(wrapper.get('[data-testid="cancel-schedule"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('version.preparingOnline')
+    expect(wrapper.emitted('refresh')).toHaveLength(1)
+    window.removeEventListener('kano-maintenance-refresh', listener)
+    wrapper.unmount()
+  })
+
+  it('recovers and cancels a reservation instead of starting a competing upgrade', async () => {
+    const job = { ...progress('scheduled'), job: { ...progress('scheduled').job, scheduled_at: '2026-10-17T20:00:00Z', preparation: 'ready' } }
+    api.currentUpdateSchedule.mockResolvedValue(job)
+    api.cancelUpdateSchedule.mockResolvedValue(undefined)
+    const wrapper = mount(ContainerUpgradePanel, { props: { info: { ...info(), schedule_ready: true, next_scheduled_at: '2026-10-17T20:00:00Z' } } })
+    await flushPromises()
+    expect(wrapper.text()).toContain('version.preparationReady')
+    expect(wrapper.get('[data-testid="schedule-upgrade"]').attributes('disabled')).toBeDefined()
+    api.currentUpdateSchedule.mockResolvedValue(progress('cancelled'))
+    await wrapper.get('[data-testid="cancel-schedule"]').trigger('click')
+    await flushPromises()
+    expect(api.cancelUpdateSchedule).toHaveBeenCalledWith(job.job.operation_id)
+    expect(api.startContainerUpdate).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('version.jobStatus.cancelled')
+    wrapper.unmount()
+  })
+
+  it('explains how to enable reservations on an older host service', async () => {
+    const wrapper = mount(ContainerUpgradePanel, { props: { info: { ...info(), schedule_ready: false } } })
+    await flushPromises()
+    expect(wrapper.text()).toContain('version.scheduleUnavailable')
+    expect(wrapper.get('[data-testid="schedule-upgrade"]').attributes('disabled')).toBeDefined()
+    expect(api.currentUpdateSchedule).not.toHaveBeenCalled()
     wrapper.unmount()
   })
 })

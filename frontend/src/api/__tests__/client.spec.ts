@@ -25,6 +25,21 @@ describe('API Client', () => {
     vi.unstubAllEnvs()
   })
 
+  it('keeps the session and does not replay writes during maintenance', async () => {
+    localStorage.setItem('auth_token', 'retained-token')
+    localStorage.setItem('auth_refresh_token', 'retained-refresh')
+    const onMaintenance = vi.fn()
+    window.addEventListener('kano-maintenance-active', onMaintenance)
+    const adapter = vi.fn().mockRejectedValue({ response: { status: 503, headers: { 'x-kano-maintenance': 'true' }, data: { error: { type: 'maintenance' } } }, config: { url: '/keys' } })
+    apiClient.defaults.adapter = adapter
+    await expect(apiClient.post('/keys', { name: 'one write' })).rejects.toMatchObject({ code: 'MAINTENANCE', status: 503 })
+    expect(adapter).toHaveBeenCalledTimes(1)
+    expect(onMaintenance).toHaveBeenCalledTimes(1)
+    expect(localStorage.getItem('auth_token')).toBe('retained-token')
+    expect(localStorage.getItem('auth_refresh_token')).toBe('retained-refresh')
+    window.removeEventListener('kano-maintenance-active', onMaintenance)
+  })
+
   // --- 请求拦截器 ---
 
   describe('请求拦截器', () => {
