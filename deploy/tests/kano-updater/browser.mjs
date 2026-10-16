@@ -107,6 +107,7 @@ try {
   assert.equal(offlineHTML.status(), 503)
   await offlinePage.locator('#started').waitFor()
   await offlinePage.waitForFunction(() => document.querySelector('#started').textContent !== '正在获取')
+  await offlinePage.waitForFunction(() => document.querySelector('#elapsed').textContent !== '—')
   assert.match(await offlinePage.title(), /kano API/)
   assert.equal((await anonymous.request.get(`${origin}/kano-maintenance/status`)).status(), 200)
   const offlineAPI = await anonymous.request.get(`${origin}/v1/models`, { headers: { Accept: 'text/html' } })
@@ -124,6 +125,7 @@ try {
   // immediately navigates away and Chromium can discard its response body.
   let accepted
   await page.route('**/api/v1/admin/system/update-schedule', async route => {
+    if (route.request().method() !== 'POST') return route.continue()
     const response = await route.fetch()
     accepted = { status: response.status(), body: await response.json() }
     await route.fulfill({ response })

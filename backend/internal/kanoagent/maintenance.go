@@ -74,7 +74,7 @@ func maintenancePolicy() string {
 		_, body, _ := strings.Cut(maintenanceHTML, "<"+tag+">")
 		body, _, _ = strings.Cut(body, "</"+tag+">")
 		sum := sha256.Sum256([]byte(body))
-		hashes = append(hashes, tag+"-src 'sha256:"+base64.StdEncoding.EncodeToString(sum[:])+"'")
+		hashes = append(hashes, tag+"-src 'sha256-"+base64.StdEncoding.EncodeToString(sum[:])+"'")
 	}
 	return "default-src 'none'; " + strings.Join(hashes, "; ") + "; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'"
 }
