@@ -135,6 +135,39 @@ func (r *integrationRunner) Run(ctx context.Context, args []string, input io.Rea
 		_ = os.WriteFile(filepath.Join(args[len(args)-1], ".env"), []byte("corrupted backup"), 0o600)
 	}
 	joined := strings.Join(args, " ")
+	if !private && r.fault == "background_startup" && strings.HasSuffix(joined, " stop --timeout 60 sub2api") {
+		// Seed an enabled due probe only after the old process has stopped, so
+		// its own periodic probe cannot consume the regression before freezing.
+		// Missing credentials make the eventual probe a local persisted failure;
+		// no model or external billing HTTP request is made by this fixture.
+		fixture := &Engine{Config: r.config, Runner: r.command}
+		postgres, inspectErr := fixture.container(ctx, "postgres")
+		if inspectErr != nil {
+			return nil, inspectErr
+		}
+		query := `INSERT INTO accounts(name,platform,type,status,credentials,extra) VALUES ('fixture-due-billing-probe','openai','apikey','active','{}','{"upstream_billing_probe_enabled":true}')`
+		if _, seedErr := fixture.pg(ctx, postgres, query); seedErr != nil {
+			return nil, seedErr
+		}
+		redisContainer, inspectErr := fixture.container(ctx, "redis")
+		if inspectErr != nil {
+			return nil, inspectErr
+		}
+		cache, cacheErr := redisClient(redisContainer, redisContainer, 0)
+		if cacheErr != nil {
+			return nil, cacheErr
+		}
+		defer func() { _ = cache.Close() }()
+		keys, cacheErr := cache.Keys(ctx, "*upstream:billing:probe:leader*").Result()
+		if cacheErr != nil {
+			return nil, cacheErr
+		}
+		if len(keys) > 0 {
+			if cacheErr = cache.Del(ctx, keys...).Err(); cacheErr != nil {
+				return nil, cacheErr
+			}
+		}
+	}
 	if private && strings.Contains(joined, " stop --timeout 60 sub2api") && r.fault == "migration" {
 		_, err = r.command.Run(ctx, []string{"docker", "exec", project + "-postgres", "psql", "-U", "sub2api", "-d", "sub2api", "-c", "UPDATE users SET balance=999 WHERE id=1"}, nil, nil)
 		if err != nil {
@@ -501,6 +534,10 @@ func TestKanoUpdaterDockerBackgroundStartup(t *testing.T) {
 		count, parseErr := strconv.ParseInt(value, 10, 64)
 		return parseErr == nil && count > state.Snapshot.Database.Tables["ops_system_metrics"].Count
 	}, 30*time.Second, 100*time.Millisecond)
+	require.Eventually(t, func() bool {
+		value, queryErr := engine.pg(context.Background(), postgres, `SELECT extra->'upstream_billing_probe'->>'last_error' FROM accounts WHERE name='fixture-due-billing-probe'`)
+		return queryErr == nil && value == "missing_api_key"
+	}, 30*time.Second, 100*time.Millisecond, "the enabled due probe must resume only after public commit")
 	app, err := engine.container(context.Background(), "sub2api")
 	require.NoError(t, err)
 	require.Equal(t, "true", app.Environment()["OPS_ENABLED"])
