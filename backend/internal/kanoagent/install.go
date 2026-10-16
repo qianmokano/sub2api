@@ -3,7 +3,6 @@ package kanoagent
 import (
 	"context"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -78,8 +77,33 @@ func ConnectDeployment(ctx context.Context, config Config, nginxSite string, run
 	} else if err != nil {
 		return err
 	}
-	progress := fmt.Sprintf("location ^~ /kano-updates/ {\n    proxy_pass http://unix:%s:;\n    proxy_set_header Host $host;\n    proxy_buffering off;\n    proxy_read_timeout 15s;\n    access_log off;\n}\n", config.ProgressSocket)
-	gate := fmt.Sprintf("if (-f %s) { return 503; }\n", config.MaintenanceFile)
+	publicDir := filepath.Dir(config.MaintenanceFile)
+	if err = os.MkdirAll(publicDir, 0o750); err != nil {
+		return err
+	}
+	if err = os.Chmod(publicDir, 0o750); err != nil {
+		return err
+	}
+	if err = os.Chown(publicDir, -1, config.ProgressGID); err != nil {
+		return err
+	}
+	if err = atomicFile(filepath.Join(publicDir, "maintenance.html"), []byte(maintenanceHTML), 0o644); err != nil {
+		return err
+	}
+	progress, gate := maintenanceSnippets(config)
+	previousSnippets := make(map[string][]byte)
+	for _, path := range []string{progressSnippet, gateSnippet} {
+		body, readErr := os.ReadFile(path)
+		if readErr != nil && !errors.Is(readErr, os.ErrNotExist) {
+			return readErr
+		}
+		previousSnippets[path] = body
+		if body != nil {
+			if err = atomicFile(filepath.Join(backup, filepath.Base(path)), body, 0o600); err != nil {
+				return err
+			}
+		}
+	}
 	if err = atomicFile(progressSnippet, []byte(progress), 0o644); err != nil {
 		return err
 	}
@@ -90,6 +114,13 @@ func ConnectDeployment(ctx context.Context, config Config, nginxSite string, run
 		return err
 	}
 	if _, err = runner.Run(ctx, []string{"nginx", "-t"}, nil, nil); err != nil {
+		for path, body := range previousSnippets {
+			if body == nil {
+				_ = os.Remove(path)
+			} else if restoreErr := atomicFile(path, body, 0o644); restoreErr != nil {
+				return errors.New("nginx validation failed; restore the saved snippets before reloading")
+			}
+		}
 		if restoreErr := atomicFile(site, original, 0o644); restoreErr != nil {
 			return errors.New("nginx validation failed and its original configuration needs manual restoration")
 		}

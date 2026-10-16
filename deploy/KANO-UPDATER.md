@@ -20,6 +20,37 @@ sudo kano-updater start --version vX.Y.Z-N --digest sha256:已发布的固定摘
 
 此命令同样走持久化任务、完整备份和实际恢复验证，只输出任务编号。上线后通过后台版本菜单使用「升级」和「查看升级进度」。无需生产制造额外空版本做试验。生产验收检查服务就绪、原管理员会话、已有 API Key 的只读接口及 HTTPS `/health`；完整点击升级、故障和中断恢复由隔离集成测试验收。
 
+## 北京时间 04:00 预约
+
+执行服务 1.1.0 声明 `schedule-beijing-0400` 能力。后台版本菜单保留「立即升级」，并提供「预约下次北京时间 04:00」。确认窗口显示固定版本、完整北京时间日期及通常 30–45 分钟的维护时长。日期由主机以 `Asia/Shanghai` 计算，并以 UTC 保存；浏览器、主机本地时区和夏令时不影响预约。确认期间跨过预约点会拒绝旧日期，要求刷新确认。
+
+预约立即占用唯一未完成任务名额，固定版本、镜像摘要、清单及来源版本。在线预拉取和校验不停止业务或后台任务；新发布版本不会替换已选目标。管理员可先取消预约，再改版本或立即升级。取消与开始使用数据库原子竞争；任务开始最终预检后不能取消。准备失败、来源版本变化、磁盘不足、健康预检失败、错过 04:00 的一分钟窗口，都不进入维护，私有页面显示原因并要求管理员重新预约。服务重启恢复未来预约；到期但尚未进入维护的预约不追赶、不顺延，不会白天补跑。已经进入维护的任务仍按原流程恢复。
+
+预约保存后全站立即显示预告，页面每 10 秒查询公开状态（请求最长 3 秒），取消或未执行后撤下。普通用户只见时间和概况；管理员从版本菜单打开独立进度页，访问凭据覆盖到预约开始后 24 小时。管理员接口是 `GET/POST /api/v1/admin/system/update-schedule` 与 `DELETE /api/v1/admin/system/update-schedule/:id`，创建继续要求 `Idempotency-Key`。旧 `/jobs/current` 过滤新增预约、取消和错过状态，防止旧版应用启动时误暂停后台任务。
+
+首次上线预约版本需要先更新主机服务及 Nginx 接线，保持旧应用运行，再使用主机 CLI；旧应用不能验证要求 1.1.0 的新清单。先用现有公告功能发布一次明确北京时间预告，再预约：
+
+```sh
+sudo kano-updater schedule --version vX.Y.Z-N --digest sha256:已发布的固定摘要 --request-key 本次唯一预约标识
+sudo kano-updater cancel-schedule --id up-任务编号
+```
+
+丢失响应时复用原 `--request-key`，会返回原预约；取消后重新预约必须使用新标识。CLI 不输出访问凭据。上线后每次由管理员自行选择版本并预约；服务不做每日自动检查或自动安装。
+
+普通浏览器的页面导航在维护时收到独立的 kano API 维护 HTML（HTTP 503），显示开始时间、已用时、概况和 30–45 分钟提示。页面在服务恢复后刷新同一个 URL，保留登录状态。API、流式调用和非 GET 请求返回 JSON 503、`Retry-After: 60` 及禁止缓存头；不会向 SDK 发送 HTML，也不会自动重放写请求。公开只读 `/kano-maintenance/status` 不公开任务编号、版本、摘要、日志或内部配置。静态 HTML 和最小状态由 Nginx 托管，应用、PostgreSQL、Redis 停止或执行服务短暂离线仍可访问；详细进度继续要求单任务 Cookie。
+
+已有接线升级到 1.1.0 时，确认没有活动、预约或待恢复任务，保留运行状态与原二进制的备份；校验新附件并替换二进制后执行：
+
+```sh
+sudo systemctl stop kano-updater
+sudo kano-updater install --config /etc/kano-updater/config.json --nginx-site /etc/nginx/sites-enabled/sub2api
+sudo systemctl start kano-updater
+sudo nginx -t
+sudo systemctl reload nginx
+```
+
+这里的 `kano-updater install` 增量更新原 include 片段和静态页面、保存配置备份并验证 Nginx；不重新创建应用容器。不要重跑首次接线的 `install.sh`。验证控制和进度 socket、公开状态、原业务健康与容器身份后才预约。存在预约记录时不要降级到不理解其状态的旧主机执行器。
+
 ## 维护与恢复
 
 镜像校验期间原服务继续运行。维护状态写入 `/var/lib/kano-updater-public/maintenance`，在主机重启后仍然保留，阻断应用新请求，独立进度路由继续可用。随后优雅停止应用，捕获停写基线和逻辑备份，停止数据服务，冷备全部真实挂载并验证文件 SHA256、模式和所有权。实际恢复使用全新 PostgreSQL 集群和独立挂载；内部网络禁止邮件、模型请求和后台探测的外部副作用。

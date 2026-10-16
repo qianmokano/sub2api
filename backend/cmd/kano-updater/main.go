@@ -33,7 +33,7 @@ func run(ctx context.Context, arguments []string, output io.Writer) error {
 	ctx, cancelRun := context.WithCancel(ctx)
 	defer cancelRun()
 	if len(arguments) == 0 {
-		return errors.New("usage: kano-updater version|manifest|install|serve|start|recover")
+		return errors.New("usage: kano-updater version|manifest|install|serve|start|schedule|cancel-schedule|recover")
 	}
 	if arguments[0] == "version" {
 		_, err := fmt.Fprintln(output, kanoupdate.AgentVersion)
@@ -45,6 +45,8 @@ func run(ctx context.Context, arguments []string, output io.Writer) error {
 	nginxSite := flags.String("nginx-site", "/etc/nginx/sites-enabled/sub2api", "existing nginx site")
 	version := flags.String("version", "", "release version")
 	digest := flags.String("digest", "", "expected image digest")
+	operationID := flags.String("id", "", "reservation operation ID")
+	requestKey := flags.String("request-key", "", "idempotency key for a reservation")
 	revision := flags.String("revision", "", "source revision")
 	policyPath := flags.String("policy", "deploy/kano-upgrade-policy.json", "reviewed validation policy")
 	migrationsPath := flags.String("migrations", "backend/migrations", "source migrations")
@@ -69,7 +71,7 @@ func run(ctx context.Context, arguments []string, output io.Writer) error {
 		}
 		return json.NewEncoder(output).Encode(manifest)
 	}
-	if arguments[0] != "serve" && arguments[0] != "start" && arguments[0] != "recover" && arguments[0] != "install" {
+	if arguments[0] != "serve" && arguments[0] != "start" && arguments[0] != "schedule" && arguments[0] != "cancel-schedule" && arguments[0] != "recover" && arguments[0] != "install" {
 		return errors.New("unknown updater command")
 	}
 	if runtime.GOOS != "linux" || os.Geteuid() != 0 {
@@ -79,13 +81,30 @@ func run(ctx context.Context, arguments []string, output io.Writer) error {
 	if err != nil {
 		return err
 	}
-	if arguments[0] == "start" {
+	if arguments[0] == "start" || arguments[0] == "schedule" || arguments[0] == "cancel-schedule" {
 		client := kanoupdate.NewClient(config.ControlSocket)
-		session, err := client.Start(ctx, kanoupdate.StartRequest{Version: *version, ExpectedDigest: *digest, Actor: "host-bootstrap", IdempotencyKey: "bootstrap:" + *version})
+		if arguments[0] == "cancel-schedule" {
+			return client.CancelSchedule(ctx, *operationID)
+		}
+		request := kanoupdate.StartRequest{Version: *version, ExpectedDigest: *digest, Actor: "host-bootstrap", IdempotencyKey: "bootstrap:" + *version}
+		var session *kanoupdate.Session
+		if arguments[0] == "schedule" {
+			if *requestKey == "" {
+				return errors.New("schedule requires a unique --request-key; reuse it only to retry the same reservation")
+			}
+			request.IdempotencyKey = *requestKey
+			session, err = client.CreateSchedule(ctx, request)
+		} else {
+			session, err = client.Start(ctx, request)
+		}
 		if err != nil {
 			return err
 		}
-		return json.NewEncoder(output).Encode(map[string]any{"operation_id": session.Job.ID, "progress_url": session.ProgressURL})
+		result := map[string]any{"operation_id": session.Job.ID, "progress_url": session.ProgressURL}
+		if session.Job.ScheduledAt != nil {
+			result["scheduled_at"] = session.Job.ScheduledAt
+		}
+		return json.NewEncoder(output).Encode(result)
 	}
 	lock, err := kanoagent.AcquireHostLock(filepath.Join(config.StateDir, "host.lock"))
 	if err != nil {
@@ -102,7 +121,7 @@ func run(ctx context.Context, arguments []string, output io.Writer) error {
 		if jobErr != nil && !errors.Is(jobErr, kanoagent.ErrNotFound) {
 			return jobErr
 		}
-		if job != nil && job.Status.Active() {
+		if job != nil && job.Status.Reserved() {
 			return kanoagent.ErrBusy
 		}
 		return kanoagent.ConnectDeployment(ctx, config, *nginxSite, kanoagent.CommandRunner{DiagnosticDir: filepath.Join(config.StateDir, "diagnostics")})

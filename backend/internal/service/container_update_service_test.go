@@ -7,6 +7,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/kanoupdate"
 	"github.com/stretchr/testify/require"
@@ -28,6 +29,48 @@ func (s *containerUpdaterStub) Start(_ context.Context, request kanoupdate.Start
 }
 func (s *containerUpdaterStub) Current(context.Context) (*kanoupdate.Session, error) {
 	return s.session, s.err
+}
+func (s *containerUpdaterStub) Schedule(context.Context) (*kanoupdate.Session, error) {
+	return s.session, s.err
+}
+func (s *containerUpdaterStub) CreateSchedule(ctx context.Context, request kanoupdate.StartRequest) (*kanoupdate.Session, error) {
+	return s.Start(ctx, request)
+}
+func (s *containerUpdaterStub) CancelSchedule(context.Context, string) error { return s.err }
+
+func TestContainerReservationsRequireDeclaredHostCapability(t *testing.T) {
+	ctx := context.Background()
+	svc := NewUpdateService(nil, nil, "v0.2.16-1", "kano-container")
+	_, err := svc.ContainerSchedule(ctx)
+	require.Error(t, err)
+	updater := &containerUpdaterStub{availability: &kanoupdate.Availability{Ready: true, ProtocolVersion: 1}}
+	svc.WithContainerUpdater(updater)
+	_, err = svc.ContainerCreateSchedule(ctx, kanoupdate.StartRequest{})
+	require.Error(t, err)
+	require.Error(t, svc.ContainerCancelSchedule(ctx, "up-test"))
+	updater.availability.Capabilities = []string{kanoupdate.ScheduleCapability}
+	at := kanoupdate.NextSchedule(time.Now())
+	updater.availability.NextScheduleAt = &at
+	updater.session = &kanoupdate.Session{Job: &kanoupdate.Job{Status: kanoupdate.Scheduled, ScheduledAt: &at}}
+	request := kanoupdate.StartRequest{Version: "v0.2.16-2", ExpectedScheduleAt: &at}
+	session, err := svc.ContainerCreateSchedule(ctx, request)
+	require.NoError(t, err)
+	require.Equal(t, updater.session, session)
+	require.Equal(t, request, updater.request)
+	session, err = svc.ContainerSchedule(ctx)
+	require.NoError(t, err)
+	require.Equal(t, updater.session, session)
+	require.NoError(t, svc.ContainerCancelSchedule(ctx, "up-test"))
+	info, err := svc.CheckUpdate(ctx, false)
+	require.NoError(t, err)
+	require.True(t, info.ScheduleReady)
+	require.Equal(t, at, *info.NextScheduleAt)
+	updater.err = errors.New("private socket details")
+	_, err = svc.ContainerSchedule(ctx)
+	require.Error(t, err)
+	svc = NewUpdateService(nil, nil, "v0.2.16", "release")
+	_, err = svc.ContainerSchedule(ctx)
+	require.ErrorIs(t, err, ErrForkUpdateManaged)
 }
 
 func containerTestManifest() kanoupdate.Manifest {

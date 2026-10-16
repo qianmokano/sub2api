@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"slices"
 
 	"github.com/Wei-Shaw/sub2api/internal/kanoupdate"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
@@ -33,6 +34,8 @@ func (s *UpdateService) checkContainerUpdate(ctx context.Context, force bool) *U
 	}
 	info.UpdaterReady = available.Ready && available.ProtocolVersion == kanoupdate.ProtocolVersion
 	info.UpdaterVersion = available.AgentVersion
+	info.ScheduleReady = info.UpdaterReady && slices.Contains(available.Capabilities, kanoupdate.ScheduleCapability)
+	info.NextScheduleAt = available.NextScheduleAt
 	info.UpdateBusy = available.Busy
 	info.Warning = available.Warning
 	if !info.UpdaterReady {
@@ -93,4 +96,49 @@ func (s *UpdateService) ContainerCurrent(ctx context.Context) (*kanoupdate.Sessi
 		return nil, infraerrors.ServiceUnavailable("UPDATER_UNAVAILABLE", "Host updater is not connected")
 	}
 	return s.containerUpdater.Current(ctx)
+}
+
+type ContainerScheduler interface {
+	Schedule(context.Context) (*kanoupdate.Session, error)
+	CreateSchedule(context.Context, kanoupdate.StartRequest) (*kanoupdate.Session, error)
+	CancelSchedule(context.Context, string) error
+}
+
+func (s *UpdateService) containerScheduler(ctx context.Context) (ContainerScheduler, error) {
+	if !s.ContainerMode() {
+		return nil, ErrForkUpdateManaged
+	}
+	scheduler, ok := s.containerUpdater.(ContainerScheduler)
+	if !ok {
+		return nil, infraerrors.ServiceUnavailable("UPDATER_UNAVAILABLE", "Update the host service to version 1.1.0 or newer to enable reservations")
+	}
+	available, err := s.containerUpdater.Release(ctx, false)
+	if err != nil || available == nil || !available.Ready || available.ProtocolVersion != kanoupdate.ProtocolVersion || !slices.Contains(available.Capabilities, kanoupdate.ScheduleCapability) {
+		return nil, infraerrors.ServiceUnavailable("UPDATER_UNAVAILABLE", "Update and connect the host service with reservation support (1.1.0 or newer)")
+	}
+	return scheduler, nil
+}
+
+func (s *UpdateService) ContainerSchedule(ctx context.Context) (*kanoupdate.Session, error) {
+	scheduler, err := s.containerScheduler(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return scheduler.Schedule(ctx)
+}
+
+func (s *UpdateService) ContainerCreateSchedule(ctx context.Context, request kanoupdate.StartRequest) (*kanoupdate.Session, error) {
+	scheduler, err := s.containerScheduler(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return scheduler.CreateSchedule(ctx, request)
+}
+
+func (s *UpdateService) ContainerCancelSchedule(ctx context.Context, id string) error {
+	scheduler, err := s.containerScheduler(ctx)
+	if err != nil {
+		return err
+	}
+	return scheduler.CancelSchedule(ctx, id)
 }

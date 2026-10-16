@@ -60,20 +60,26 @@ func OpenStore(directory string) (*Store, error) {
 		return nil, err
 	}
 	db.SetMaxOpenConns(1)
-	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS jobs (
+	_, err = db.Exec(`BEGIN IMMEDIATE;
+	CREATE TABLE IF NOT EXISTS jobs (
 		id TEXT PRIMARY KEY, request_key TEXT UNIQUE NOT NULL, fingerprint TEXT NOT NULL,
 		source_version TEXT NOT NULL, target_version TEXT NOT NULL, image_digest TEXT NOT NULL,
 		status TEXT NOT NULL, message TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
 		backup_id TEXT NOT NULL DEFAULT '', manifest TEXT NOT NULL, state TEXT NOT NULL DEFAULT '{}', actor TEXT NOT NULL
 	);
-	CREATE UNIQUE INDEX IF NOT EXISTS jobs_one_active ON jobs((1))
-		WHERE status NOT IN ('succeeded','failed','failed_rolled_back');
+	DROP INDEX IF EXISTS jobs_one_active;
+	CREATE UNIQUE INDEX jobs_one_active ON jobs((1))
+		WHERE status NOT IN ('succeeded','failed','failed_rolled_back','cancelled','missed');
+	CREATE TABLE IF NOT EXISTS schedules (
+		job_id TEXT PRIMARY KEY REFERENCES jobs(id), scheduled_at TEXT NOT NULL, preparation TEXT NOT NULL
+	);
 	CREATE TABLE IF NOT EXISTS capabilities (
 		token_hash TEXT PRIMARY KEY, job_id TEXT NOT NULL REFERENCES jobs(id), expires_at INTEGER NOT NULL
 	);
 	CREATE TABLE IF NOT EXISTS job_steps (
 		id INTEGER PRIMARY KEY, job_id TEXT NOT NULL REFERENCES jobs(id), status TEXT NOT NULL, started_at TEXT NOT NULL
-	);`)
+	);
+	COMMIT;`)
 	if err != nil {
 		_ = db.Close()
 		return nil, err
@@ -91,7 +97,14 @@ func randomID() (string, error) {
 	return hex.EncodeToString(bytes[:]), nil
 }
 func fingerprint(request StartRequest) string {
-	value, _ := json.Marshal([]string{request.Actor, request.Version, request.ExpectedDigest})
+	parts := []string{request.Actor, request.Version, request.ExpectedDigest}
+	if request.Schedule {
+		parts = append(parts, "schedule")
+		if request.ExpectedScheduleAt != nil {
+			parts = append(parts, request.ExpectedScheduleAt.UTC().Format(time.RFC3339Nano))
+		}
+	}
+	value, _ := json.Marshal(parts)
 	sum := sha256.Sum256(value)
 	return hex.EncodeToString(sum[:])
 }
@@ -120,6 +133,10 @@ func (s *Store) FindRequest(ctx context.Context, request StartRequest) (*Job, er
 // Create performs both deduplication and the global active-job check atomically.
 // Replaying the same request after completion still returns its original job.
 func (s *Store) Create(ctx context.Context, request StartRequest, source string, manifest Manifest) (*Job, bool, error) {
+	return s.create(ctx, request, source, manifest, time.Now().UTC())
+}
+
+func (s *Store) create(ctx context.Context, request StartRequest, source string, manifest Manifest, now time.Time) (*Job, bool, error) {
 	if request.Actor == "" || len(request.Actor) > 128 || request.IdempotencyKey == "" || len(request.IdempotencyKey) > 256 {
 		return nil, false, errors.New("invalid update request identity")
 	}
@@ -153,7 +170,7 @@ func (s *Store) Create(ctx context.Context, request StartRequest, source string,
 		return nil, false, err
 	}
 	var active int
-	if err = tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM jobs WHERE status NOT IN ('succeeded','failed','failed_rolled_back')").Scan(&active); err != nil {
+	if err = tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM jobs WHERE status NOT IN ('succeeded','failed','failed_rolled_back','cancelled','missed')").Scan(&active); err != nil {
 		return nil, false, err
 	}
 	if active != 0 {
@@ -171,8 +188,14 @@ func (s *Store) Create(ctx context.Context, request StartRequest, source string,
 	if err != nil {
 		return nil, false, err
 	}
-	now := time.Now().UTC()
 	job := &Job{ID: "up-" + random, SourceVersion: source, TargetVersion: manifest.Version, ImageDigest: manifest.ImageDigest, Status: Queued, Message: "Upgrade queued", CreatedAt: now, UpdatedAt: now, Manifest: manifest, State: json.RawMessage(`{}`), Actor: request.Actor}
+	if request.Schedule {
+		at := kanoupdate.NextSchedule(now)
+		if request.ExpectedScheduleAt != nil && !at.Equal(*request.ExpectedScheduleAt) {
+			return nil, false, errors.New("reservation date changed; refresh the version menu before reserving again")
+		}
+		job.ScheduledAt, job.Preparation, job.Status, job.Message = &at, "pending", kanoupdate.Scheduled, "Reserved for the next Beijing 04:00; preparing online"
+	}
 	body, err := json.Marshal(manifest)
 	if err != nil {
 		return nil, false, err
@@ -181,7 +204,12 @@ func (s *Store) Create(ctx context.Context, request StartRequest, source string,
 	if err != nil {
 		return nil, false, err
 	}
-	if _, err = tx.ExecContext(ctx, "INSERT INTO job_steps(job_id,status,started_at) VALUES(?,?,?)", job.ID, Queued, now.Format(time.RFC3339Nano)); err != nil {
+	if request.Schedule {
+		if _, err = tx.ExecContext(ctx, "INSERT INTO schedules(job_id,scheduled_at,preparation) VALUES(?,?,?)", job.ID, job.ScheduledAt.Format(time.RFC3339Nano), job.Preparation); err != nil {
+			return nil, false, err
+		}
+	}
+	if _, err = tx.ExecContext(ctx, "INSERT INTO job_steps(job_id,status,started_at) VALUES(?,?,?)", job.ID, job.Status, now.Format(time.RFC3339Nano)); err != nil {
 		return nil, false, err
 	}
 	if err = tx.Commit(); err != nil {
@@ -190,12 +218,12 @@ func (s *Store) Create(ctx context.Context, request StartRequest, source string,
 	return job, true, nil
 }
 
-const jobColumns = "id,source_version,target_version,image_digest,status,message,created_at,updated_at,backup_id,manifest,state,actor"
+const jobColumns = "id,source_version,target_version,image_digest,status,message,created_at,updated_at,backup_id,manifest,state,actor,COALESCE((SELECT scheduled_at FROM schedules WHERE job_id=jobs.id),''),COALESCE((SELECT preparation FROM schedules WHERE job_id=jobs.id),'')"
 
 func readJob(row *sql.Row) (*Job, error) {
 	var job Job
-	var created, updated, manifest, state string
-	err := row.Scan(&job.ID, &job.SourceVersion, &job.TargetVersion, &job.ImageDigest, &job.Status, &job.Message, &created, &updated, &job.BackupID, &manifest, &state, &job.Actor)
+	var created, updated, manifest, state, scheduled string
+	err := row.Scan(&job.ID, &job.SourceVersion, &job.TargetVersion, &job.ImageDigest, &job.Status, &job.Message, &created, &updated, &job.BackupID, &manifest, &state, &job.Actor, &scheduled, &job.Preparation)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -212,6 +240,13 @@ func readJob(row *sql.Row) (*Job, error) {
 		return nil, err
 	}
 	job.State = json.RawMessage(state)
+	if scheduled != "" {
+		at, parseErr := time.Parse(time.RFC3339Nano, scheduled)
+		if parseErr != nil {
+			return nil, parseErr
+		}
+		job.ScheduledAt = &at
+	}
 	return &job, nil
 }
 
@@ -224,7 +259,7 @@ func (s *Store) Get(ctx context.Context, id string) (*Job, error) {
 }
 
 func (s *Store) Current(ctx context.Context) (*Job, error) {
-	job, err := readJob(s.db.QueryRowContext(ctx, "SELECT "+jobColumns+" FROM jobs ORDER BY CASE WHEN status NOT IN ('succeeded','failed','failed_rolled_back') THEN 0 ELSE 1 END,rowid DESC LIMIT 1"))
+	job, err := readJob(s.db.QueryRowContext(ctx, "SELECT "+jobColumns+" FROM jobs ORDER BY CASE WHEN status NOT IN ('succeeded','failed','failed_rolled_back','cancelled','missed') THEN 0 ELSE 1 END,rowid DESC LIMIT 1"))
 	if err != nil {
 		return nil, err
 	}
@@ -300,7 +335,8 @@ func (s *Store) Checkpoint(ctx context.Context, id string, state any, backupID s
 }
 
 func (s *Store) Grant(ctx context.Context, id string) (string, error) {
-	if _, err := s.Get(ctx, id); err != nil {
+	job, err := s.Get(ctx, id)
+	if err != nil {
 		return "", err
 	}
 	var bytes [32]byte
@@ -309,7 +345,7 @@ func (s *Store) Grant(ctx context.Context, id string) (string, error) {
 	}
 	token := hex.EncodeToString(bytes[:])
 	sum := sha256.Sum256([]byte(token))
-	_, err := s.db.ExecContext(ctx, "INSERT INTO capabilities(token_hash,job_id,expires_at) VALUES(?,?,?)", hex.EncodeToString(sum[:]), id, time.Now().Add(24*time.Hour).Unix())
+	_, err = s.db.ExecContext(ctx, "INSERT INTO capabilities(token_hash,job_id,expires_at) VALUES(?,?,?)", hex.EncodeToString(sum[:]), id, job.SessionExpiresAt(time.Now()).Unix())
 	if err != nil {
 		return "", err
 	}

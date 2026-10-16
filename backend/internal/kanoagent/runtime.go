@@ -197,6 +197,7 @@ type ImageVerifier interface {
 }
 
 type Engine struct {
+	Now      func() time.Time
 	Config   Config
 	Runner   Runner
 	Source   ReleaseSource

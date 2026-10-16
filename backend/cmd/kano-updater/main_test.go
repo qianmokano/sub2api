@@ -47,9 +47,38 @@ func TestCLIRejectsUnprivilegedHostCommands(t *testing.T) {
 	if runtime.GOOS == "linux" && os.Geteuid() == 0 {
 		t.Skip("non-root permission boundary is exercised by the ordinary unit run")
 	}
-	for _, command := range []string{"serve", "start", "recover", "install"} {
+	for _, command := range []string{"serve", "start", "schedule", "cancel-schedule", "recover", "install"} {
 		require.ErrorContains(t, run(context.Background(), []string{command}, io.Discard), "Linux root")
 	}
+}
+
+func TestCLIHostReservationAndCancellation(t *testing.T) {
+	config, path := cliHostConfig(t)
+	listener, err := kanoagent.ListenUnix(config.ControlSocket, config.ControlGID)
+	require.NoError(t, err)
+	id := "up-" + strings.Repeat("a", 32)
+	at := kanoupdate.NextSchedule(time.Now())
+	server := &http.Server{ReadHeaderTimeout: time.Second, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "DELETE" {
+			require.Equal(t, "/schedule/"+id, r.URL.Path)
+			_, _ = io.WriteString(w, `{"cancelled":true}`)
+			return
+		}
+		require.Equal(t, "/schedule", r.URL.Path)
+		var request kanoupdate.StartRequest
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&request))
+		require.Equal(t, "specific-reservation", request.IdempotencyKey)
+		require.Equal(t, "host-bootstrap", request.Actor)
+		_ = json.NewEncoder(w).Encode(kanoupdate.Session{Job: &kanoupdate.Job{ID: id, ScheduledAt: &at}, Capability: "private-capability", ProgressURL: "/kano-updates/" + id})
+	})}
+	go func() { _ = server.Serve(listener) }()
+	t.Cleanup(func() { require.NoError(t, server.Close()) })
+	var output bytes.Buffer
+	require.ErrorContains(t, run(context.Background(), []string{"schedule", "--config", path}, &output), "request-key")
+	require.NoError(t, run(context.Background(), []string{"schedule", "--config", path, "--version", "v0.2.16-2", "--digest", "sha256:" + strings.Repeat("b", 64), "--request-key", "specific-reservation"}, &output))
+	require.Contains(t, output.String(), at.Format(time.RFC3339))
+	require.NotContains(t, output.String(), "private-capability")
+	require.NoError(t, run(context.Background(), []string{"cancel-schedule", "--config", path, "--id", id}, io.Discard))
 }
 
 func cliHostConfig(t *testing.T) (kanoagent.Config, string) {
