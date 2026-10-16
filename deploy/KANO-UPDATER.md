@@ -47,3 +47,5 @@ sudo systemctl start kano-updater
 旧发布没有清单、主机 profile 不支持或迁移需要删除/转换旧业务数据时，后台拒绝在线安装并要求人工升级。新的表或列需在策略中声明并完成相应验收；旧字段、历史迁移校验值及未声明设置始终保留。原版构建继续使用原二进制更新逻辑，fork 的上游二进制下载、任意回退和重启入口保持禁用。
 
 如需替换更新服务本身，先确认没有活动/需要处理的任务，再停止服务，校验安装包并替换 `/usr/local/bin/kano-updater`，保持配置、SQLite 和备份目录，随后启动服务。后台会根据清单的最低服务版本提示需先人工更新执行服务。
+
+systemd 单元使用 `RuntimeDirectory=kano-updater`、`RuntimeDirectoryMode=0711` 和 `RuntimeDirectoryPreserve=yes` 管理 `/run/kano-updater`。父目录允许按名称穿过，控制及进度子目录仍按各自组保持 0750，socket 保持 0660；保留目录 inode 也保证服务替换时容器的目录绑定有效。旧安装若进度页 502 且 Nginx 报 Unix socket Permission denied，应增量添加同值的 service drop-in、daemon-reload，并在确认父目录为 root 所有的真实目录后设置 0711。不要放宽子目录、socket 或状态目录权限；该配置修复不需要重建应用或重跑数据升级。

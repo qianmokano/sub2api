@@ -7,6 +7,9 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=root
+RuntimeDirectory=kano-updater
+RuntimeDirectoryMode=0711
+RuntimeDirectoryPreserve=yes
 ExecStart=/usr/local/bin/kano-updater serve --config /etc/kano-updater/config.json
 Restart=on-failure
 RestartSec=5
