@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/kanoupdate"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
@@ -27,6 +28,10 @@ func (h *SystemHandler) containerUpdater() (containerUpdateService, bool) {
 }
 
 func (h *SystemHandler) performContainerUpdate(c *gin.Context, updater containerUpdateService) {
+	performContainerAction(c, updater.ContainerStart)
+}
+
+func performContainerAction(c *gin.Context, start func(context.Context, kanoupdate.StartRequest) (*kanoupdate.Session, error)) {
 	subject, ok := middleware2.GetAuthSubjectFromContext(c)
 	if !ok || subject.UserID <= 0 {
 		response.Error(c, http.StatusUnauthorized, "Administrator identity is required")
@@ -38,15 +43,16 @@ func (h *SystemHandler) performContainerUpdate(c *gin.Context, updater container
 		return
 	}
 	var request struct {
-		Version        string `json:"version"`
-		ExpectedDigest string `json:"expected_digest"`
+		Version            string     `json:"version"`
+		ExpectedDigest     string     `json:"expected_digest"`
+		ExpectedScheduleAt *time.Time `json:"expected_scheduled_at"`
 	}
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 64<<10)
 	if err := c.ShouldBindJSON(&request); err != nil {
 		response.Error(c, http.StatusBadRequest, "Invalid upgrade request")
 		return
 	}
-	session, err := updater.ContainerStart(c.Request.Context(), kanoupdate.StartRequest{Version: request.Version, ExpectedDigest: request.ExpectedDigest, IdempotencyKey: key, Actor: "admin:" + strconv.FormatInt(subject.UserID, 10)})
+	session, err := start(c.Request.Context(), kanoupdate.StartRequest{Version: request.Version, ExpectedDigest: request.ExpectedDigest, IdempotencyKey: key, Actor: "admin:" + strconv.FormatInt(subject.UserID, 10), ExpectedScheduleAt: request.ExpectedScheduleAt})
 	if err != nil {
 		containerUpdateError(c, err)
 		return
@@ -94,7 +100,14 @@ func progressCookie(c *gin.Context, session *kanoupdate.Session) bool {
 		return false
 	}
 	c.Header("Cache-Control", "no-store")
-	http.SetCookie(c.Writer, &http.Cookie{Name: kanoupdate.CookieName(session.Job.ID), Value: session.Capability, Path: session.ProgressURL, Secure: true, HttpOnly: true, SameSite: http.SameSiteStrictMode, MaxAge: 24 * 60 * 60})
+	maxAge := 24 * 60 * 60
+	if !session.ExpiresAt.IsZero() {
+		seconds := int(time.Until(session.ExpiresAt).Seconds())
+		if seconds > 0 && seconds <= 48*60*60 {
+			maxAge = seconds
+		}
+	}
+	http.SetCookie(c.Writer, &http.Cookie{Name: kanoupdate.CookieName(session.Job.ID), Value: session.Capability, Path: session.ProgressURL, Secure: true, HttpOnly: true, SameSite: http.SameSiteStrictMode, MaxAge: maxAge})
 	return true
 }
 

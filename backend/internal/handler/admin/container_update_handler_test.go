@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/kanoupdate"
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
@@ -30,6 +31,46 @@ func (s *containerHandlerStub) ContainerStart(_ context.Context, request kanoupd
 }
 func (s *containerHandlerStub) ContainerCurrent(context.Context) (*kanoupdate.Session, error) {
 	return s.session, s.err
+}
+func (s *containerHandlerStub) ContainerSchedule(context.Context) (*kanoupdate.Session, error) {
+	return s.session, s.err
+}
+func (s *containerHandlerStub) ContainerCreateSchedule(ctx context.Context, request kanoupdate.StartRequest) (*kanoupdate.Session, error) {
+	return s.ContainerStart(ctx, request)
+}
+func (s *containerHandlerStub) ContainerCancelSchedule(context.Context, string) error { return s.err }
+
+func TestReservationHandlersKeepCapabilityPrivateAndExtendCookie(t *testing.T) {
+	id := "up-" + strings.Repeat("d", 32)
+	at := time.Now().Add(12 * time.Hour).UTC()
+	secret := strings.Repeat("e", 64)
+	stub := &containerHandlerStub{session: &kanoupdate.Session{Job: &kanoupdate.Job{ID: id, Status: kanoupdate.Scheduled, ScheduledAt: &at}, Capability: secret, ProgressURL: "/kano-updates/" + id, ExpiresAt: at.Add(24 * time.Hour)}}
+	handler := NewSystemHandler(stub, nil)
+	body := `{"version":"v0.2.16-2","expected_digest":"sha256:test","expected_scheduled_at":"` + at.Format(time.RFC3339) + `"}`
+	result := containerHandlerRequest(t, handler.CreateUpdateSchedule, true, "reserve-once", body)
+	require.Equal(t, 202, result.Code)
+	require.Equal(t, "admin:42", stub.request.Actor)
+	require.WithinDuration(t, at, *stub.request.ExpectedScheduleAt, time.Second)
+	require.NotContains(t, result.Body.String(), secret)
+	cookie := result.Result().Cookies()[0]
+	require.Greater(t, cookie.MaxAge, 35*60*60)
+	require.LessOrEqual(t, cookie.MaxAge, 36*60*60)
+	result = containerHandlerRequest(t, handler.UpdateSchedule, true, "", "")
+	require.Equal(t, 200, result.Code)
+	require.NotContains(t, result.Body.String(), secret)
+	stub.err = &kanoupdate.RemoteError{Status: 409, Message: "Reservation already started"}
+	result = containerHandlerRequest(t, handler.UpdateSchedule, true, "", "")
+	require.Equal(t, 409, result.Code)
+	result = containerHandlerRequest(t, func(c *gin.Context) { c.Params = gin.Params{{Key: "id", Value: id}}; handler.CancelUpdateSchedule(c) }, true, "", "")
+	require.Equal(t, 409, result.Code)
+	stub.err = nil
+	result = containerHandlerRequest(t, func(c *gin.Context) { c.Params = gin.Params{{Key: "id", Value: id}}; handler.CancelUpdateSchedule(c) }, true, "", "")
+	require.Equal(t, 200, result.Code)
+	result = containerHandlerRequest(t, handler.CancelUpdateSchedule, true, "", "")
+	require.Equal(t, 400, result.Code)
+	stub.session = &kanoupdate.Session{}
+	result = containerHandlerRequest(t, handler.UpdateSchedule, true, "", "")
+	require.Contains(t, result.Body.String(), `"job":null`)
 }
 
 func containerHandlerRequest(t *testing.T, handler gin.HandlerFunc, authenticated bool, key, body string) *httptest.ResponseRecorder {

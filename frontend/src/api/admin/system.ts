@@ -25,6 +25,8 @@ export interface VersionInfo {
   update_busy?: boolean
   target_image_digest?: string
   unavailable_reason?: string
+  schedule_ready?: boolean
+  next_scheduled_at?: string
 }
 
 export interface ContainerUpdateJob {
@@ -35,6 +37,8 @@ export interface ContainerUpdateJob {
   message: string
   created_at: string
   updated_at: string
+  scheduled_at?: string
+  preparation?: string
 }
 
 export interface ContainerUpdateResult {
@@ -59,6 +63,22 @@ export async function startContainerUpdate(
 export async function currentContainerUpdate(): Promise<ContainerUpdateResult> {
   const { data } = await apiClient.get<ContainerUpdateResult>('/admin/system/update-job', { timeout: 45000 })
   return data
+}
+
+export async function currentUpdateSchedule(): Promise<ContainerUpdateResult> {
+  const { data } = await apiClient.get<ContainerUpdateResult>('/admin/system/update-schedule', { timeout: 45000 })
+  return data
+}
+
+export async function createUpdateSchedule(version: string, expectedDigest: string, expectedScheduledAt: string, idempotencyKey: string): Promise<ContainerUpdateResult> {
+  const { data } = await apiClient.post<ContainerUpdateResult>('/admin/system/update-schedule',
+    { version, expected_digest: expectedDigest, expected_scheduled_at: expectedScheduledAt },
+    { headers: { 'Idempotency-Key': idempotencyKey }, timeout: 45000 })
+  return data
+}
+
+export async function cancelUpdateSchedule(id: string): Promise<void> {
+  await apiClient.delete(`/admin/system/update-schedule/${encodeURIComponent(id)}`, { timeout: 45000 })
 }
 
 /**

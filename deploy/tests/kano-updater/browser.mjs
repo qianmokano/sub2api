@@ -45,6 +45,9 @@ try {
   const { data: session } = await login.json()
   assert.ok(session.access_token && session.user.role === 'admin')
   const authorization = { Authorization: `Bearer ${session.access_token}` }
+  const anonymous = await browser.newContext({ ignoreHTTPSErrors: true })
+  const ordinaryPage = await anonymous.newPage()
+  await ordinaryPage.goto(`${origin}/login?from=maintenance`)
   const compliance = await context.request.get(`${origin}/api/v1/admin/compliance`, { headers: authorization })
   assert.equal(compliance.status(), 200)
   const { data: declaration } = await compliance.json()
@@ -77,29 +80,80 @@ try {
   })
   assert.equal(await button.isEnabled(), true)
   await page.screenshot({ path: path.join(artifacts, 'upgrade-button.png'), fullPage: true })
+  const scheduleButton = panel.getByRole('button', { name: 'Reserve next 04:00 Beijing time', exact: true })
+  await scheduleButton.click()
+  assert.match(await page.getByRole('dialog').innerText(), /04:00/)
+  await page.getByRole('dialog').getByRole('button', { name: 'Confirm', exact: true }).click()
+  await panel.getByRole('button', { name: 'Cancel reservation', exact: true }).waitFor()
+  expectedAudits++
+  await page.getByTestId('maintenance-banner').waitFor({ timeout: 15000 })
+  await ordinaryPage.getByTestId('maintenance-banner').waitFor({ timeout: 15000 })
+  const reserved = await context.request.get(`${origin}/api/v1/admin/system/update-schedule`, { headers: authorization })
+  assert.equal(reserved.status(), 200)
+  const firstReservation = (await reserved.json()).data
+  const publicNotice = await anonymous.request.get(`${origin}/kano-maintenance/status`)
+  const publicJSON = await publicNotice.json()
+  assert.equal(publicJSON.scheduled_at, firstReservation.job.scheduled_at)
+  for (const privateValue of [firstReservation.operation_id, 'v0.2.16-2', 'image_digest', 'capability', 'manifest']) assert.equal(JSON.stringify(publicJSON).includes(privateValue), false)
+  assert.equal((await anonymous.request.get(`${origin}${firstReservation.progress_url}`)).status(), 403)
+  await panel.getByRole('button', { name: 'Cancel reservation', exact: true }).click()
+  expectedAudits++
+  await page.getByTestId('maintenance-banner').waitFor({ state: 'detached', timeout: 15000 })
+  await ordinaryPage.getByTestId('maintenance-banner').waitFor({ state: 'detached', timeout: 15000 })
+  // The static page and minimal status still work without any host daemon.
+  assert.equal((await context.request.post(`${origin}/fixture/offline`)).status(), 200)
+  const offlinePage = await anonymous.newPage()
+  const offlineHTML = await offlinePage.goto(`${origin}/login?offline=1`)
+  assert.equal(offlineHTML.status(), 503)
+  await offlinePage.locator('#started').waitFor()
+  await offlinePage.waitForFunction(() => document.querySelector('#started').textContent !== '正在获取')
+  await offlinePage.waitForFunction(() => document.querySelector('#elapsed').textContent !== '—')
+  assert.match(await offlinePage.title(), /kano API/)
+  assert.equal((await anonymous.request.get(`${origin}/kano-maintenance/status`)).status(), 200)
+  const offlineAPI = await anonymous.request.get(`${origin}/v1/models`, { headers: { Accept: 'text/html' } })
+  assert.equal(offlineAPI.status(), 503)
+  assert.match(offlineAPI.headers()['content-type'], /application\/json/)
+  assert.equal((await offlineAPI.json()).error.type, 'maintenance')
+  await offlinePage.screenshot({ path: path.join(artifacts, 'maintenance-daemon-offline.png'), fullPage: true })
+  assert.equal((await context.request.post(`${origin}/fixture/online`)).status(), 200)
+  await offlinePage.waitForFunction(() => !document.querySelector('#phase'), { timeout: 30000 })
+  await offlinePage.close()
+  await page.reload()
+  await page.getByRole('button', { name: 'v0.2.16-1', exact: true }).first().click()
   assert.equal((await context.request.get(`${origin}/fixture/baseline?expected_audits=${expectedAudits}`, { timeout: 120_000 })).status(), 200)
   // Capture the real response before handing it to the page: the application
   // immediately navigates away and Chromium can discard its response body.
   let accepted
-  await page.route('**/api/v1/admin/system/update', async route => {
+  await page.route('**/api/v1/admin/system/update-schedule', async route => {
+    if (route.request().method() !== 'POST') return route.continue()
     const response = await route.fetch()
     accepted = { status: response.status(), body: await response.json() }
     await route.fulfill({ response })
   })
-  await button.click()
-  await page.waitForURL(new RegExp(`${origin}/kano-updates/up-[a-f0-9]{32}$`))
+  await scheduleButton.click()
+  await page.getByRole('dialog').getByRole('button', { name: 'Confirm', exact: true }).click()
+  await panel.getByRole('button', { name: 'Cancel reservation', exact: true }).waitFor()
   assert.equal(accepted.status, 202)
   const { data: job } = accepted.body
   assert.match(job.progress_url, /^\/kano-updates\/up-[a-f0-9]{32}$/)
   assert.equal(JSON.stringify(job).includes('capability'), false)
-  assert.equal(page.url(), `${origin}${job.progress_url}`)
+  assert.ok(job.job.scheduled_at)
   const cookie = (await context.cookies()).find(item => item.path === job.progress_url)
   assert.ok(cookie && cookie.secure && cookie.httpOnly && cookie.sameSite === 'Strict')
   assert.equal(await page.evaluate(() => document.cookie.includes('kano_update_')), false)
-  const anonymous = await browser.newContext({ ignoreHTTPSErrors: true })
   assert.equal((await anonymous.request.get(`${origin}${job.progress_url}`)).status(), 403)
   assert.equal((await anonymous.request.get(`${origin}${job.progress_url}/status`)).status(), 403)
-  await anonymous.close()
+  const preparedDeadline = Date.now() + 60000
+  while (true) {
+    const response = await context.request.get(`${origin}${job.progress_url}/status`)
+    const status = await response.json()
+    if (status.preparation === 'ready') break
+    assert.ok(Date.now() < preparedDeadline, 'online preparation timed out')
+    await new Promise(resolve => setTimeout(resolve, 200))
+  }
+  assert.equal((await context.request.get(`${origin}/health`)).status(), 200)
+  assert.equal((await context.request.post(`${origin}/fixture/clock?at=${encodeURIComponent(job.job.scheduled_at)}`)).status(), 200)
+  await page.goto(`${origin}${job.progress_url}`)
   const deadline = Date.now() + 8 * 60_000
   let checkedMaintenance = false
   while (true) {
@@ -109,6 +163,19 @@ try {
     assert.equal(JSON.stringify(status).includes('fixture-private-value'), false)
     if (!checkedMaintenance && ['backing_up', 'restoring', 'verifying', 'switching', 'checking'].includes(status.status)) {
       assert.equal((await context.request.get(`${origin}/health`)).status(), 503)
+      const apiResponse = await anonymous.request.post(`${origin}/v1/chat/completions`, { headers: { Accept: 'text/event-stream' }, data: { stream: true } })
+      assert.equal(apiResponse.status(), 503)
+      assert.match(apiResponse.headers()['content-type'], /application\/json/)
+      assert.equal(apiResponse.headers()['retry-after'], '60')
+      assert.match(apiResponse.headers()['cache-control'], /no-store/)
+      assert.equal((await apiResponse.json()).error.type, 'maintenance')
+      const maintenancePage = await ordinaryPage.goto(`${origin}/login?from=maintenance`)
+      assert.equal(maintenancePage.status(), 503)
+      await ordinaryPage.locator('#phase').waitFor()
+      assert.match(await ordinaryPage.locator('main').innerText(), /30–45/)
+      await ordinaryPage.screenshot({ path: path.join(artifacts, 'public-maintenance.png'), fullPage: true })
+      await ordinaryPage.setViewportSize({ width: 390, height: 844 })
+      await ordinaryPage.screenshot({ path: path.join(artifacts, 'public-maintenance-mobile.png'), fullPage: true })
       const refreshed = await page.reload()
       assert.equal(refreshed.status(), 200)
       await page.locator('#step').waitFor()
@@ -124,6 +191,9 @@ try {
   }
   assert.equal(checkedMaintenance, true)
   assert.equal((await context.request.get(`${origin}/health`)).status(), 200)
+  await ordinaryPage.waitForFunction(() => !document.querySelector('#phase'), { timeout: 30000 })
+  assert.equal(ordinaryPage.url(), `${origin}/login?from=maintenance`, 'recovery must refresh the original URL')
+  await anonymous.close()
   await page.reload()
   await page.locator('#step.done').waitFor()
   await page.screenshot({ path: path.join(artifacts, 'upgrade-complete.png'), fullPage: true })
@@ -133,7 +203,7 @@ try {
   const profile = await context.request.get(`${origin}/api/v1/user/profile`, { headers: { Authorization: `Bearer ${session.access_token}` } })
   assert.equal(profile.status(), 200, 'pre-upgrade administrator session was lost')
   passed = true
-  console.log('HTTPS browser upgrade passed: real 202, scoped cookie, anonymous 403, refresh during maintenance, retained administrator session and recent task.')
+  console.log('HTTPS scheduled upgrade passed: date confirmation, immediate and cross-tab banners, cancellation, online preparation, static maintenance with daemon offline, JSON API/stream 503, private progress, automatic recovery to original URL and retained session.')
 } finally {
   if (!passed) {
     await page.screenshot({ path: path.join(artifacts, 'failure.png'), fullPage: true }).catch(() => {})

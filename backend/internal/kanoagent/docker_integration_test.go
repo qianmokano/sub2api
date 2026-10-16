@@ -208,6 +208,9 @@ type integrationExecutor struct {
 func (e *integrationExecutor) CurrentVersion(ctx context.Context) (string, error) {
 	return e.engine.CurrentVersion(ctx)
 }
+func (e *integrationExecutor) PrepareSchedule(ctx context.Context, job *Job) error {
+	return e.engine.PrepareSchedule(ctx, job)
+}
 func (e *integrationExecutor) Execute(ctx context.Context, store *Store, job *Job) error {
 	operation, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -271,6 +274,18 @@ func TestKanoUpdaterDockerWorker(t *testing.T) {
 	go func() { _ = proxyServer.ListenAndServe() }()
 	defer func() { _ = proxyServer.Close() }()
 	server := NewServer(store, source, &integrationExecutor{engine: engine, runner: runner})
+	server.MaintenanceFile = config.MaintenanceFile
+	if os.Getenv("KANO_UPDATER_BROWSER_TEST") == "1" {
+		clock := func() time.Time {
+			body, err := os.ReadFile(filepath.Join(config.StateDir, "fixture-clock.json"))
+			var at time.Time
+			if err == nil && json.Unmarshal(body, &at) == nil {
+				return at
+			}
+			return time.Now().UTC()
+		}
+		server.Now, engine.Now = clock, clock
+	}
 	control, err := ListenUnix(config.ControlSocket, config.ControlGID)
 	require.NoError(t, err)
 	defer func() { _ = control.Close() }()
@@ -499,6 +514,24 @@ func TestKanoUpdaterDockerBackgroundStartup(t *testing.T) {
 	adminToken := fixtureAdminSession(t, engine)
 	_, key := seedDockerData(t, engine)
 	manifest := integrationManifest(t)
+	reservation, err := client.CreateSchedule(context.Background(), StartRequest{Version: manifest.Version, ExpectedDigest: manifest.ImageDigest, Actor: "fixture-admin:1", IdempotencyKey: "background-reservation"})
+	require.NoError(t, err)
+	legacy, err := client.Current(context.Background())
+	require.NoError(t, err)
+	require.Nil(t, legacy.Job)
+	metrics, err := engine.pg(context.Background(), postgres, "SELECT count(*) FROM ops_system_metrics")
+	require.NoError(t, err)
+	_, err = engine.compose(context.Background(), "restart", "sub2api")
+	require.NoError(t, err)
+	waitFixtureHealth(t, engine)
+	require.Eventually(t, func() bool {
+		value, queryErr := engine.pg(context.Background(), postgres, "SELECT count(*) FROM ops_system_metrics")
+		count, parseErr := strconv.Atoi(value)
+		beforeCount, beforeErr := strconv.Atoi(metrics)
+		return queryErr == nil && parseErr == nil && beforeErr == nil && count > beforeCount
+	}, 30*time.Second, 100*time.Millisecond, "a pending reservation must not pause old app background workers after restart")
+	require.NoFileExists(t, config.MaintenanceFile)
+	require.NoError(t, client.CancelSchedule(context.Background(), reservation.Job.ID))
 	session, err := client.Start(context.Background(), StartRequest{Version: manifest.Version, ExpectedDigest: manifest.ImageDigest, Actor: "fixture-admin:1", IdempotencyKey: "background-startup"})
 	require.NoError(t, err)
 	store, err := OpenStore(config.StateDir)
@@ -737,7 +770,7 @@ func TestKanoUpdaterDockerBrowser(t *testing.T) {
 				return
 			}
 			expectedAudits, parseErr := strconv.Atoi(r.URL.Query().Get("expected_audits"))
-			if parseErr != nil || expectedAudits < 2 || expectedAudits > 3 {
+			if parseErr != nil || expectedAudits < 2 || expectedAudits > 10 {
 				w.WriteHeader(400)
 				return
 			}
@@ -766,6 +799,28 @@ func TestKanoUpdaterDockerBrowser(t *testing.T) {
 			default:
 				w.WriteHeader(409)
 			}
+		case r.Method == http.MethodPost && r.URL.Path == "/clock":
+			at, parseErr := time.Parse(time.RFC3339, r.URL.Query().Get("at"))
+			if parseErr != nil || writePrivateJSON(filepath.Join(config.StateDir, "fixture-clock.json"), at) != nil {
+				w.WriteHeader(400)
+				return
+			}
+			writeJSON(w, 200, map[string]bool{"advanced": true})
+		case r.Method == http.MethodPost && r.URL.Path == "/offline":
+			stopDockerWorker(worker)
+			worker = nil
+			if err := engine.maintenance("fixture-offline", true); err != nil {
+				w.WriteHeader(500)
+				return
+			}
+			writeJSON(w, 200, map[string]bool{"offline": true})
+		case r.Method == http.MethodPost && r.URL.Path == "/online":
+			if err := engine.maintenance("fixture-offline", false); err != nil {
+				w.WriteHeader(500)
+				return
+			}
+			worker = startDockerWorker(t, configPath, "")
+			writeJSON(w, 200, map[string]bool{"online": true})
 		case r.Method == http.MethodPost && r.URL.Path == "/done":
 			select {
 			case finished <- r.URL.Query().Get("ok") == "true":
@@ -819,9 +874,9 @@ func TestKanoUpdaterDockerBrowser(t *testing.T) {
 	require.Equal(t, before.Tables["audit_logs"].Count+1, state.Snapshot.Database.Tables["audit_logs"].Count)
 	before.Tables["audit_logs"] = state.Snapshot.Database.Tables["audit_logs"]
 	require.NoError(t, CompareDatabase(before, state.Snapshot.Database, integrationManifest(t), false))
-	audit, err := engine.pg(context.Background(), postgres, "SELECT COUNT(*) FROM audit_logs WHERE actor_user_id=1 AND method='POST' AND path='/api/v1/admin/system/update' AND status_code=202")
+	audit, err := engine.pg(context.Background(), postgres, "SELECT COUNT(*) FROM audit_logs WHERE actor_user_id=1 AND method='POST' AND path='/api/v1/admin/system/update-schedule' AND status_code=202")
 	require.NoError(t, err)
-	require.Equal(t, "1", audit)
+	require.Equal(t, "2", audit)
 	after, err := engine.database(context.Background(), postgres, &state.Snapshot.Database)
 	require.NoError(t, err)
 	require.NoError(t, CompareDatabase(state.Snapshot.Database, after, integrationManifest(t), false))

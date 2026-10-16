@@ -15,7 +15,43 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/Wei-Shaw/sub2api/internal/kanoupdate"
 )
+
+var errScheduleWindow = errors.New("reservation maintenance window has closed")
+
+func (e *Engine) now() time.Time {
+	if e.Now != nil {
+		return e.Now().UTC()
+	}
+	return time.Now().UTC()
+}
+
+// PrepareSchedule only pulls and verifies immutable release artifacts. It never
+// changes job execution status, maintenance, containers, or app background work.
+func (e *Engine) PrepareSchedule(ctx context.Context, job *Job) (err error) {
+	if err = e.Config.Validate(); err != nil {
+		return err
+	}
+	defer func() {
+		if err != nil && jobPattern.MatchString(job.ID) {
+			_ = writePrivateJSON(filepath.Join(e.Config.StateDir, "diagnostics", "preparation-"+job.ID+".json"), map[string]any{"operation_id": job.ID, "recorded_at": time.Now().UTC(), "error": err.Error()})
+		}
+	}()
+	release, err := e.Source.Resolve(ctx, job.TargetVersion)
+	if err != nil {
+		return err
+	}
+	if release == nil || release.Manifest == nil || !reflect.DeepEqual(*release.Manifest, job.Manifest) {
+		return errors.New("verified release changed before execution")
+	}
+	verifier := e.Verifier
+	if verifier == nil {
+		verifier = e
+	}
+	return verifier.Prepare(ctx, job.Manifest)
+}
 
 func (e *Engine) checkpoint(ctx context.Context, store *Store, job *Job, state *UpgradeState) error {
 	return store.Checkpoint(ctx, job.ID, state, filepath.Base(state.BackupPath))
@@ -45,28 +81,39 @@ func (e *Engine) Execute(ctx context.Context, store *Store, job *Job) (err error
 	if state.Maintenance || state.ProductionTouched || state.PublicCommitted {
 		return e.recover(ctx, store, job, state)
 	}
+	failureReason := "Release image verification failed"
 	defer func() {
 		if err != nil {
-			_ = e.failure(store, job, state)
+			if job.ScheduledAt != nil && safeBeforeMaintenance(e.Config.MaintenanceFile, state) {
+				if state.Maintenance {
+					state.Maintenance = false
+					_ = e.checkpoint(context.Background(), store, job, state)
+				}
+				if errors.Is(err, errScheduleWindow) {
+					failureReason = "Reservation window missed during final preflight"
+				}
+				_ = store.Update(context.Background(), job.ID, kanoupdate.Missed, failureReason+"; gateway remains available; reserve another date manually")
+			} else {
+				_ = e.failure(store, job, state)
+			}
 		}
 	}()
+	if !job.InScheduleWindow(e.now()) {
+		return errScheduleWindow
+	}
+	if job.ScheduledAt != nil {
+		if _, gateErr := os.Stat(e.Config.MaintenanceFile); !os.IsNotExist(gateErr) {
+			failureReason = "An existing maintenance or recovery gate needs administrator attention"
+			return errors.New("reservation cannot replace an existing maintenance gate")
+		}
+	}
 	if err = store.Update(ctx, job.ID, Pulling, "Pulling and verifying the release image"); err != nil {
 		return err
 	}
-	release, resolveErr := e.Source.Resolve(ctx, job.TargetVersion)
-	if resolveErr != nil {
-		return resolveErr
-	}
-	if release == nil || release.Manifest == nil || !reflect.DeepEqual(*release.Manifest, job.Manifest) {
-		return errors.New("verified release changed before execution")
-	}
-	verifier := e.Verifier
-	if verifier == nil {
-		verifier = e
-	}
-	if err = verifier.Prepare(ctx, job.Manifest); err != nil {
+	if err = e.PrepareSchedule(ctx, job); err != nil {
 		return err
 	}
+	failureReason = "Deployment configuration could not be verified"
 	if err = store.Update(ctx, job.ID, Preflight, "Checking deployment and free space"); err != nil {
 		return err
 	}
@@ -75,14 +122,18 @@ func (e *Engine) Execute(ctx context.Context, store *Store, job *Job) (err error
 		return snapshotErr
 	}
 	if snapshot.Containers["sub2api"].Config.Labels["org.opencontainers.image.version"] != job.SourceVersion {
+		failureReason = "Running version changed after reservation"
 		return errors.New("deployment changed before upgrade")
 	}
+	failureReason = "Insufficient disk space for the complete backup and restore"
 	if _, err = e.storageBudget(ctx, snapshot); err != nil {
 		return err
 	}
 	if err = e.health(ctx); err != nil {
+		failureReason = "Gateway health preflight failed"
 		return err
 	}
+	failureReason = "Could not prepare the backup location or persist the preflight checkpoint"
 	state.Snapshot = snapshot
 	state.BackupPath = filepath.Join(e.Config.BackupDir, "online-"+time.Now().UTC().Format("20060102T150405Z")+"-"+strings.TrimPrefix(job.ID, "up-"))
 	state.PrivateProject = "kano-verify-" + strings.TrimPrefix(job.ID, "up-")
@@ -93,12 +144,22 @@ func (e *Engine) Execute(ctx context.Context, store *Store, job *Job) (err error
 	if err = e.checkpoint(ctx, store, job, state); err != nil {
 		return err
 	}
+	if !job.InScheduleWindow(e.now()) {
+		return errScheduleWindow
+	}
 	if err = store.Update(ctx, job.ID, BackingUp, "Maintenance: creating a complete backup"); err != nil {
 		return err
 	}
 	state.Maintenance = true
 	if err = e.checkpoint(ctx, store, job, state); err != nil {
 		return err
+	}
+	if !job.InScheduleWindow(e.now()) {
+		state.Maintenance = false
+		if err = e.checkpoint(ctx, store, job, state); err != nil {
+			return err
+		}
+		return errScheduleWindow
 	}
 	if err = e.maintenance(job.ID, true); err != nil {
 		return err
@@ -261,6 +322,15 @@ func (e *Engine) maintenance(id string, enabled bool) error {
 			return err
 		}
 		if err := os.Chown(directory, -1, e.Config.ProgressGID); err != nil {
+			return err
+		}
+		if _, err := os.Stat(e.Config.MaintenanceFile); os.IsNotExist(err) {
+			started := e.now()
+			// Retain the original start time across daemon recovery.
+			if err := atomicPublicJSON(filepath.Join(directory, "maintenance-status.json"), kanoupdate.MaintenanceStatus{Maintenance: true, StartedAt: &started}); err != nil {
+				return err
+			}
+		} else if err != nil {
 			return err
 		}
 		return atomicFile(e.Config.MaintenanceFile, []byte(id+"\n"), 0o644)

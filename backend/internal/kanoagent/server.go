@@ -16,6 +16,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/Wei-Shaw/sub2api/internal/kanoupdate"
 )
 
 var jobPattern = regexp.MustCompile(`^up-[a-f0-9]{32}$`)
@@ -26,17 +28,23 @@ type Executor interface {
 }
 
 type Server struct {
-	Store    *Store
-	Source   ReleaseSource
-	Executor Executor
-	Wake     chan struct{}
-	mu       sync.Mutex
-	latest   *Release
-	latestAt time.Time
+	Store           *Store
+	Source          ReleaseSource
+	Executor        Executor
+	Wake            chan struct{}
+	mu              sync.Mutex
+	latest          *Release
+	latestAt        time.Time
+	Now             func() time.Time
+	MaintenanceFile string
 }
 
 func NewServer(store *Store, source ReleaseSource, executor Executor) *Server {
-	return &Server{Store: store, Source: source, Executor: executor, Wake: make(chan struct{}, 1)}
+	server := &Server{Store: store, Source: source, Executor: executor, Wake: make(chan struct{}, 1)}
+	if engine, ok := executor.(*Engine); ok {
+		server.MaintenanceFile = engine.Config.MaintenanceFile
+	}
+	return server
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {
@@ -87,7 +95,8 @@ func (s *Server) ControlHandler() http.Handler {
 			writeError(w, 503, "Updater state is unavailable")
 			return
 		}
-		writeJSON(w, 200, Availability{AgentVersion: AgentVersion, ProtocolVersion: ProtocolVersion, Ready: true, Busy: job != nil && job.Status.Active()})
+		next := kanoupdate.NextSchedule(s.now())
+		writeJSON(w, 200, Availability{AgentVersion: AgentVersion, ProtocolVersion: ProtocolVersion, Ready: true, Busy: job != nil && job.Status.Reserved(), Capabilities: []string{kanoupdate.ScheduleCapability}, NextScheduleAt: &next})
 	})
 	mux.HandleFunc("GET /release", func(w http.ResponseWriter, r *http.Request) {
 		current, err := s.Executor.CurrentVersion(r.Context())
@@ -96,7 +105,9 @@ func (s *Server) ControlHandler() http.Handler {
 			return
 		}
 		release, releaseErr := s.cachedRelease(r.Context(), r.URL.Query().Get("force") == "true")
-		availability := Availability{AgentVersion: AgentVersion, ProtocolVersion: ProtocolVersion, Ready: true, CurrentVersion: current, Release: release}
+		availability := Availability{AgentVersion: AgentVersion, ProtocolVersion: ProtocolVersion, Ready: true, CurrentVersion: current, Release: release, Capabilities: []string{kanoupdate.ScheduleCapability}}
+		next := kanoupdate.NextSchedule(s.now())
+		availability.NextScheduleAt = &next
 		if releaseErr != nil {
 			availability.Warning = "Release check unavailable; showing the last verified release"
 		}
@@ -105,14 +116,15 @@ func (s *Server) ControlHandler() http.Handler {
 			writeError(w, 503, "Updater state is unavailable")
 			return
 		}
-		availability.Busy = job != nil && job.Status.Active()
+		availability.Busy = job != nil && job.Status.Reserved()
 		writeJSON(w, 200, availability)
 	})
-	mux.HandleFunc("POST /jobs", func(w http.ResponseWriter, r *http.Request) {
+	create := func(w http.ResponseWriter, r *http.Request) {
 		var request StartRequest
 		if !decodeRequest(w, r, &request) {
 			return
 		}
+		request.Schedule = r.URL.Path == "/schedule"
 		if !ValidReleaseVersion(request.Version) || !ValidDigest(request.ExpectedDigest) {
 			writeError(w, 400, "Invalid update target")
 			return
@@ -148,7 +160,7 @@ func (s *Server) ControlHandler() http.Handler {
 			writeError(w, 503, "Deployment is unavailable")
 			return
 		}
-		job, created, err := s.Store.Create(r.Context(), request, current, *release.Manifest)
+		job, created, err := s.Store.create(r.Context(), request, current, *release.Manifest, s.now())
 		if err != nil {
 			status := 400
 			if errors.Is(err, ErrBusy) || errors.Is(err, ErrIdempotencyConflict) {
@@ -169,25 +181,45 @@ func (s *Server) ControlHandler() http.Handler {
 			return
 		}
 		writeJSON(w, http.StatusAccepted, session)
+	}
+	mux.HandleFunc("POST /jobs", create)
+	mux.HandleFunc("POST /schedule", create)
+	mux.HandleFunc("GET /schedule", func(w http.ResponseWriter, r *http.Request) {
+		s.writeSession(w, r, s.Store.Schedule)
+	})
+	mux.HandleFunc("DELETE /schedule/{id}", func(w http.ResponseWriter, r *http.Request) {
+		if !jobPattern.MatchString(r.PathValue("id")) {
+			writeError(w, 400, "Invalid reservation")
+			return
+		}
+		if err := s.Store.CancelSchedule(r.Context(), r.PathValue("id")); err != nil {
+			writeError(w, 409, "Reservation has started or is no longer available")
+			return
+		}
+		writeJSON(w, 200, map[string]bool{"cancelled": true})
 	})
 	mux.HandleFunc("GET /jobs/current", func(w http.ResponseWriter, r *http.Request) {
-		job, err := s.Store.Current(r.Context())
-		if errors.Is(err, ErrNotFound) {
-			writeJSON(w, 200, map[string]any{"job": nil})
-			return
-		}
-		if err != nil {
-			writeError(w, 503, "Updater state is unavailable")
-			return
-		}
-		session, err := s.session(r.Context(), job)
-		if err != nil {
-			writeError(w, 503, "Updater progress is unavailable")
-			return
-		}
-		writeJSON(w, 200, session)
+		s.writeSession(w, r, s.Store.LegacyCurrent)
 	})
 	return mux
+}
+
+func (s *Server) writeSession(w http.ResponseWriter, r *http.Request, lookup func(context.Context) (*Job, error)) {
+	job, err := lookup(r.Context())
+	if errors.Is(err, ErrNotFound) {
+		writeJSON(w, 200, map[string]any{"job": nil})
+		return
+	}
+	if err != nil {
+		writeError(w, 503, "Updater state is unavailable")
+		return
+	}
+	session, err := s.session(r.Context(), job)
+	if err != nil {
+		writeError(w, 503, "Updater progress is unavailable")
+		return
+	}
+	writeJSON(w, 200, session)
 }
 
 func (s *Server) session(ctx context.Context, job *Job) (*Session, error) {
@@ -195,7 +227,7 @@ func (s *Server) session(ctx context.Context, job *Job) (*Session, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Session{Job: job, Capability: token, ProgressURL: "/kano-updates/" + job.ID}, nil
+	return &Session{Job: job, Capability: token, ProgressURL: "/kano-updates/" + job.ID, ExpiresAt: job.SessionExpiresAt(s.now())}, nil
 }
 
 // Run resumes interrupted work even when no application process is available.
@@ -203,6 +235,7 @@ func (s *Server) session(ctx context.Context, job *Job) (*Session, error) {
 func (s *Server) Run(ctx context.Context) {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
+	s.expireOnStartup(ctx)
 	select {
 	case s.Wake <- struct{}{}:
 	default:
@@ -215,6 +248,10 @@ func (s *Server) Run(ctx context.Context) {
 		case <-ticker.C:
 		}
 		job, err := s.Store.Current(ctx)
+		if err == nil && job != nil && job.Status == kanoupdate.Scheduled {
+			s.advanceSchedule(ctx, job)
+			job, err = s.Store.Current(ctx)
+		}
 		if err != nil || job == nil || !job.Status.Active() || job.Status == NeedsAttention {
 			continue
 		}
@@ -239,6 +276,15 @@ func (s *Server) ProgressHandler() http.Handler {
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "no-referrer")
+		if r.Method == http.MethodGet && r.URL.Path == "/kano-maintenance/status" {
+			status, err := s.publicStatus(r.Context())
+			if err != nil {
+				writeError(w, 503, "Maintenance status temporarily unavailable")
+				return
+			}
+			writeJSON(w, 200, status)
+			return
+		}
 		if r.Method != http.MethodGet {
 			writeError(w, 405, "Only progress viewing is allowed")
 			return

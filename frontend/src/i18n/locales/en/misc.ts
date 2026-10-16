@@ -19,13 +19,23 @@ export default {
 
   // Version Badge
   version: {
-    containerHint: 'Each upgrade verifies a complete backup and restore. Service may be briefly unavailable.',
+    containerHint: 'Each upgrade verifies a complete backup and restore. Maintenance usually takes 30–45 minutes.',
     updaterUnavailable: 'The host updater is not connected. Online upgrade is unavailable.',
     updaterReady: 'Host updater is ready.',
     upgradeNow: 'Upgrade',
+    scheduleNext: 'Reserve next 04:00 Beijing time',
+    scheduleUnavailable: 'Reservations require host updater 1.1.0 or newer. Update the host service first.',
+    scheduleConfirm: 'Reserve {version} for {time} Beijing time. Maintenance usually takes 30–45 minutes. A site-wide notice appears immediately and the image prepares while service stays online. If preparation or the start window is missed, reserve again manually.',
+    reservedAt: 'Reserved for {time} Beijing time',
+    preparationReady: 'Image verified; waiting for the reservation. Background tasks continue normally.',
+    preparingOnline: 'Preparing the image online. Service remains available.',
+    cancelSchedule: 'Cancel reservation',
     submittingUpgrade: 'Starting upgrade…',
     viewProgress: 'View upgrade progress',
     jobStatus: {
+      scheduled: 'Waiting for reserved time',
+      cancelled: 'Reservation cancelled',
+      missed: 'Reservation did not run; reserve again',
       queued: 'Queued',
       pulling: 'Pulling image',
       preflight: 'Checking deployment',
@@ -78,6 +88,10 @@ export default {
     deployDocker: 'Docker',
     dockerEditCompose: 'Edit the image tag in docker-compose.yml',
     dockerRecreate: 'Recreate the container'
+  },
+
+  maintenance: {
+    scheduled: 'Scheduled maintenance begins at {time} Beijing time, usually lasting 30–45 minutes. The API will be temporarily unavailable during maintenance.'
   },
 
   // Recharge / Subscription Page

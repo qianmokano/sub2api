@@ -19,13 +19,23 @@ export default {
 
   // Version Badge
   version: {
-    containerHint: '每次升级都会完成备份和实际恢复验证，期间服务可能短暂不可用。',
+    containerHint: '每次升级都会完成完整备份和实际恢复验证，维护通常约 30–45 分钟。',
     updaterUnavailable: '主机更新服务尚未接入，暂不可在线升级。',
     updaterReady: '更新服务已就绪。',
-    upgradeNow: '升级',
+    upgradeNow: '立即升级',
+    scheduleNext: '预约下次北京时间 04:00',
+    scheduleUnavailable: '预约需要主机更新服务 1.1.0 或更新版本，请先更新主机服务。',
+    scheduleConfirm: '将 {version} 预约到北京时间 {time}。维护通常约 30–45 分钟。预约后立即通知全站，镜像在业务运行时提前准备；若未准备就绪或错过窗口，本次不维护，需重新预约。',
+    reservedAt: '预约时间：北京时间 {time}',
+    preparationReady: '镜像已校验，等待预约时间；后台任务照常运行。',
+    preparingOnline: '正在在线准备镜像，服务正常运行。',
+    cancelSchedule: '取消预约',
     submittingUpgrade: '正在创建升级任务…',
     viewProgress: '查看升级进度',
     jobStatus: {
+      scheduled: '等待预约执行',
+      cancelled: '预约已取消',
+      missed: '预约未执行，请重新预约',
       queued: '等待执行',
       pulling: '拉取镜像',
       preflight: '检查部署',
@@ -77,6 +87,10 @@ export default {
     deployDocker: 'Docker',
     dockerEditCompose: '修改 docker-compose.yml 中的镜像版本',
     dockerRecreate: '重新创建容器'
+  },
+
+  maintenance: {
+    scheduled: '维护预告：北京时间 {time} 开始升级，通常约 30–45 分钟。维护期间 API 将暂时不可用，恢复后可继续使用。'
   },
 
   // Recharge / Subscription Page

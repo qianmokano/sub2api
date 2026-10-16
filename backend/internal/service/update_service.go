@@ -95,6 +95,8 @@ type UpdateInfo struct {
 	UpdateBusy        bool         `json:"update_busy"`
 	TargetImageDigest string       `json:"target_image_digest,omitempty"`
 	UnavailableReason string       `json:"unavailable_reason,omitempty"`
+	ScheduleReady     bool         `json:"schedule_ready"`
+	NextScheduleAt    *time.Time   `json:"next_scheduled_at,omitempty"`
 }
 
 // ReleaseInfo contains GitHub release details

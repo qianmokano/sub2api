@@ -93,3 +93,22 @@ func (c *Client) Current(ctx context.Context) (*Session, error) {
 	err := c.call(ctx, http.MethodGet, "/jobs/current", nil, &value)
 	return &value, err
 }
+
+func (c *Client) Schedule(ctx context.Context) (*Session, error) {
+	var value Session
+	err := c.call(ctx, http.MethodGet, "/schedule", nil, &value)
+	return &value, err
+}
+
+func (c *Client) CreateSchedule(ctx context.Context, request StartRequest) (*Session, error) {
+	var value Session
+	err := c.call(ctx, http.MethodPost, "/schedule", request, &value)
+	return &value, err
+}
+
+func (c *Client) CancelSchedule(ctx context.Context, id string) error {
+	var value struct {
+		Cancelled bool `json:"cancelled"`
+	}
+	return c.call(ctx, http.MethodDelete, "/schedule/"+url.PathEscape(id), nil, &value)
+}
