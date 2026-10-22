@@ -187,6 +187,7 @@ type UpgradeState struct {
 	BackupComplete    bool             `json:"backup_complete"`
 	ProductionTouched bool             `json:"production_touched"`
 	PublicCommitted   bool             `json:"public_committed"`
+	PrunedBackups     []string         `json:"pruned_backups,omitempty"`
 	Snapshot          *RuntimeSnapshot `json:"snapshot,omitempty"`
 	DumpDigest        string           `json:"dump_digest"`
 	GlobalsDigest     string           `json:"globals_digest"`

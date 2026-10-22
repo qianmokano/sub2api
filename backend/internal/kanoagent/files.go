@@ -10,8 +10,10 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"sort"
 	"strconv"
+	"strings"
 	"syscall"
 
 	"golang.org/x/sys/unix"
@@ -293,6 +295,75 @@ func (e *Engine) storageBudget(ctx context.Context, snapshot *RuntimeSnapshot) (
 		return required, errors.New("insufficient disk space for a complete backup and isolated restore")
 	}
 	return required, nil
+}
+
+var supersededBackupPattern = regexp.MustCompile(`^online-\d{8}T\d{6}Z-[a-f0-9]{32}$`)
+
+// pruneSupersededBackups deletes the complete backups left behind by finished
+// upgrade jobs so a new task can budget disk for its own backup and isolated
+// restore. It never touches the running job's directory, jobs the store still
+// considers active, names outside the managed backup layout, or any directory
+// a container still mounts.
+func (e *Engine) pruneSupersededBackups(ctx context.Context, store *Store, job *Job) ([]string, error) {
+	entries, err := os.ReadDir(e.Config.BackupDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	mounted, err := e.mountedPaths(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var removed []string
+	for _, entry := range entries {
+		name := entry.Name()
+		if !entry.IsDir() || !supersededBackupPattern.MatchString(name) {
+			continue
+		}
+		previous, err := store.Get(ctx, "up-"+name[strings.LastIndexByte(name, '-')+1:])
+		if err != nil || previous.ID == job.ID || previous.Status.Active() {
+			continue
+		}
+		path := filepath.Join(e.Config.BackupDir, name)
+		shadowed := false
+		for _, source := range mounted {
+			if inside(source, path) {
+				shadowed = true
+				break
+			}
+		}
+		if shadowed {
+			continue
+		}
+		if os.RemoveAll(path) == nil {
+			removed = append(removed, name)
+		}
+	}
+	return removed, nil
+}
+
+// mountedPaths lists every bind-mount source of every container, including
+// stopped ones, so pruning cannot pull a backup out from under a container.
+func (e *Engine) mountedPaths(ctx context.Context) ([]string, error) {
+	value, err := e.run(ctx, "docker", "ps", "-aq")
+	if err != nil {
+		return nil, err
+	}
+	var paths []string
+	for _, id := range strings.Fields(string(value)) {
+		info, err := e.inspect(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		for _, mount := range info.Mounts {
+			if mount.Source != "" {
+				paths = append(paths, mount.Source)
+			}
+		}
+	}
+	return paths, nil
 }
 
 func postgresSources(snapshot *RuntimeSnapshot) []string {
