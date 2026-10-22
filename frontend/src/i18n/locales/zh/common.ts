@@ -276,6 +276,7 @@ export default {
       SSO_MFA_CODE_INVALID: '验证码错误，请重试。',
       SSO_REGISTER_CODE_INVALID: '邮箱验证码错误或已过期。',
       SSO_CODE_RESEND_WAIT: '请稍后再发送验证码。',
+      SSO_EMAIL_DOMAIN_NOT_ALLOWED: '该邮箱域名不允许注册 kano 通行证。',
       SSO_PROVIDER_UNAVAILABLE: 'kano 通行证暂时不可用，请稍后重试。',
       SSO_ACCOUNT_SYNC_FAILED: '通行证已创建，请使用同一账号登录重试；绑定失败请联系管理员。',
       SSO_CAPTCHA_REQUIRED: '请使用下方通行证按钮完成验证。',

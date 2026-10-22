@@ -194,6 +194,7 @@ func TestSSORegistrationPoliciesAndProviderErrors(t *testing.T) {
 	}{
 		{casdoor.ErrCredentials, "INVALID_CREDENTIALS"}, {casdoor.ErrFrozen, "SSO_ACCOUNT_LOCKED"}, {casdoor.ErrCaptcha, "SSO_CAPTCHA_REQUIRED"},
 		{casdoor.ErrMFACode, "SSO_MFA_CODE_INVALID"}, {casdoor.ErrCode, "SSO_REGISTER_CODE_INVALID"}, {casdoor.ErrEmailExists, infraerrors.Reason(ErrEmailExists)},
+		{casdoor.ErrEmailDomain, "SSO_EMAIL_DOMAIN_NOT_ALLOWED"},
 		{casdoor.ErrResendWait, "SSO_CODE_RESEND_WAIT"}, {casdoor.ErrIdentity, "SSO_IDENTITY_INVALID"}, {errors.New("secret"), "SSO_PROVIDER_UNAVAILABLE"},
 	} {
 		require.Equal(t, tc.reason, infraerrors.Reason(ssoProviderError(tc.err)))

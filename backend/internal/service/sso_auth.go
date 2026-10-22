@@ -246,6 +246,8 @@ func ssoProviderError(err error) error {
 		return infraerrors.BadRequest("SSO_REGISTER_CODE_INVALID", "Invalid or expired email verification code")
 	case errors.Is(err, casdoor.ErrEmailExists):
 		return ErrEmailExists
+	case errors.Is(err, casdoor.ErrEmailDomain):
+		return infraerrors.Forbidden("SSO_EMAIL_DOMAIN_NOT_ALLOWED", "This email domain is not allowed to sign up")
 	case errors.Is(err, casdoor.ErrResendWait):
 		return infraerrors.TooManyRequests("SSO_CODE_RESEND_WAIT", "Wait before requesting another verification code")
 	case errors.Is(err, casdoor.ErrIdentity):

@@ -22,6 +22,7 @@ var (
 	ErrMFACode     = errors.New("invalid MFA code")
 	ErrCode        = errors.New("invalid registration code")
 	ErrEmailExists = errors.New("email already exists")
+	ErrEmailDomain = errors.New("email domain is not allowed to sign up")
 	ErrResendWait  = errors.New("wait before requesting another code")
 	ErrUnavailable = errors.New("identity provider unavailable")
 	ErrIdentity    = errors.New("invalid identity provider account")
@@ -254,6 +255,9 @@ func (c *Client) SendCode(ctx context.Context, email string, proofs ...*casdoorc
 	if strings.Contains(message, "already exists") {
 		return ErrEmailExists
 	}
+	if strings.Contains(message, "email domain") {
+		return ErrEmailDomain
+	}
 	if strings.Contains(message, "only send one code") {
 		return ErrResendWait
 	}
@@ -281,6 +285,9 @@ func (c *Client) Register(ctx context.Context, email, password, code, displayNam
 	message := strings.ToLower(result.Msg)
 	if strings.Contains(message, "captcha") || strings.Contains(message, "turing test") {
 		return nil, ErrCaptcha
+	}
+	if strings.Contains(message, "email domain") {
+		return nil, ErrEmailDomain
 	}
 	if strings.Contains(message, "code") {
 		return nil, ErrCode
