@@ -125,6 +125,17 @@ func (e *Engine) Execute(ctx context.Context, store *Store, job *Job) (err error
 		failureReason = "Running version changed after reservation"
 		return errors.New("deployment changed before upgrade")
 	}
+	failureReason = "Superseded backup cleanup failed"
+	pruned, pruneErr := e.pruneSupersededBackups(ctx, store, job)
+	if pruneErr != nil {
+		return pruneErr
+	}
+	if len(pruned) > 0 {
+		state.PrunedBackups = pruned
+		if err = store.Update(ctx, job.ID, Preflight, fmt.Sprintf("Pruned %d superseded backup(s) from finished upgrades; checking free space", len(pruned))); err != nil {
+			return err
+		}
+	}
 	failureReason = "Insufficient disk space for the complete backup and restore"
 	if _, err = e.storageBudget(ctx, snapshot); err != nil {
 		return err
