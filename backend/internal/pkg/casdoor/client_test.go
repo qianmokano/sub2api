@@ -170,7 +170,7 @@ func TestClientSafeProviderErrors(t *testing.T) {
 	for _, tc := range []struct {
 		message string
 		want    error
-	}{{"email already exists", ErrEmailExists}, {"only send one code", ErrResendWait}, {"secret details", ErrUnavailable}} {
+	}{{"email already exists", ErrEmailExists}, {"The email domain is not allowed to sign up", ErrEmailDomain}, {"only send one code", ErrResendWait}, {"secret details", ErrUnavailable}} {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			require.NoError(t, r.ParseForm())
 			require.Equal(t, "signup", r.Form.Get("method"))
@@ -185,7 +185,7 @@ func TestClientSafeProviderErrors(t *testing.T) {
 	for _, tc := range []struct {
 		message string
 		want    error
-	}{{"email code incorrect", ErrCode}, {"email already exists", ErrEmailExists}, {"secret details", ErrUnavailable}} {
+	}{{"email code incorrect", ErrCode}, {"The email domain is not allowed to sign up", ErrEmailDomain}, {"email already exists", ErrEmailExists}, {"secret details", ErrUnavailable}} {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			_ = json.NewEncoder(w).Encode(map[string]string{"status": "error", "msg": tc.message})
 		}))

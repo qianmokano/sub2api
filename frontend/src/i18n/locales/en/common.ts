@@ -276,6 +276,7 @@ export default {
       SSO_MFA_CODE_INVALID: 'Incorrect verification code; try again.',
       SSO_REGISTER_CODE_INVALID: 'Invalid or expired email verification code.',
       SSO_CODE_RESEND_WAIT: 'Wait before requesting another code.',
+      SSO_EMAIL_DOMAIN_NOT_ALLOWED: 'This email domain is not allowed to sign up for kano Passport.',
       SSO_PROVIDER_UNAVAILABLE: 'kano Passport is temporarily unavailable; try again later.',
       SSO_ACCOUNT_SYNC_FAILED: 'Passport created; sign in with the same account to retry. Contact support if account linking fails.',
       SSO_CAPTCHA_REQUIRED: 'Use the Passport button below to complete verification.',
