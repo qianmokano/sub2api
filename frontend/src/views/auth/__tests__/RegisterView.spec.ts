@@ -334,6 +334,16 @@ describe('RegisterView', () => {
     expect(showErrorMock).not.toHaveBeenCalled()
   })
 
+  it('places the email field above the Passport verification code field', async () => {
+    getPublicSettingsMock.mockResolvedValueOnce({ ...publicSettings, sso_enabled: true, sso_registration_enabled: true })
+    const wrapper = mountRegister()
+    await flushPromises()
+    const email = wrapper.get('#email').element
+    const code = wrapper.get('#sso-register-code').element
+    expect(email.compareDocumentPosition(code) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    wrapper.unmount()
+  })
+
   it('registers with Passport despite local registration, invitation and email restrictions', async () => {
     getPublicSettingsMock.mockResolvedValueOnce({ ...publicSettings, sso_enabled: true, sso_registration_enabled: true, registration_enabled: false, invitation_code_enabled: true, email_verify_enabled: true, turnstile_enabled: false, registration_email_suffix_whitelist: ['blocked.invalid'] })
     registerSSOMock.mockResolvedValue({ access_token: 'token' })

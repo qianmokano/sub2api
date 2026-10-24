@@ -28,13 +28,6 @@
 
       <!-- Registration Form -->
       <form v-else @submit.prevent="handleRegister" class="space-y-5">
-        <div v-if="ssoEnabled" class="space-y-2">
-          <label for="sso-register-code" class="input-label">{{ t('auth.sso.code') }}</label>
-          <div class="flex gap-2">
-            <input id="sso-register-code" v-model="ssoCode" class="input" autocomplete="one-time-code" required maxlength="128" :disabled="isLoading" />
-            <button type="button" class="btn btn-secondary shrink-0" :disabled="isLoading || ssoCodeCountdown > 0 || !settingsLoaded || agreementGateActive" @click="handleSSOSendCode">{{ ssoCodeCountdown > 0 ? `${ssoCodeCountdown}s` : t('auth.sso.sendCode') }}</button>
-          </div>
-        </div>
         <!-- Email Input -->
         <div>
           <label for="email" class="input-label">
@@ -56,6 +49,15 @@
               :class="{ 'input-error': errors.email }"
               :placeholder="t('auth.emailPlaceholder')"
             />
+          </div>
+        </div>
+
+        <!-- Verification Code Input (Passport SSO mode) -->
+        <div v-if="ssoEnabled" class="space-y-2">
+          <label for="sso-register-code" class="input-label">{{ t('auth.sso.code') }}</label>
+          <div class="flex gap-2">
+            <input id="sso-register-code" v-model="ssoCode" class="input" autocomplete="one-time-code" required maxlength="128" :disabled="isLoading" />
+            <button type="button" class="btn btn-secondary shrink-0" :disabled="isLoading || ssoCodeCountdown > 0 || !settingsLoaded || agreementGateActive" @click="handleSSOSendCode">{{ ssoCodeCountdown > 0 ? `${ssoCodeCountdown}s` : t('auth.sso.sendCode') }}</button>
           </div>
         </div>
 
