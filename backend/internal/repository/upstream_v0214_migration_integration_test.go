@@ -200,6 +200,8 @@ func TestMigrationsRunner_UpgradeV0216PreservesPassportAndBusinessRows(t *testin
 	newMigrations := []string{
 		"242_drop_platform_check_constraints.sql", "242_group_i18n.sql", "243_gemini_cached_contents.sql",
 		"244_gemini_cached_contents_channel_usage.sql", "245_gemini_cached_contents_mutation_lease.sql",
+		"246_enable_gemini_image_generation_groups.sql", "247_scoped_admin_api_keys.sql",
+		"248_group_image_count_billing.sql",
 	}
 	var migrationCount int
 	require.NoError(t, db.QueryRowContext(ctx, "SELECT COUNT(*) FROM schema_migrations").Scan(&migrationCount))
