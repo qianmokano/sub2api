@@ -674,7 +674,14 @@ func TestKanoUpdaterDockerLifecycle(t *testing.T) {
 					t.Logf("scenario=%s table=%s snapshot_rows=%d final_rows=%d", fault, table, original.Count, actual.Count)
 				}
 			}
-			require.NoError(t, CompareDatabase(before, after, manifest, false))
+			// A rolled-back scenario restores the source schema and migration
+			// catalog, so it is compared against that state instead of the target
+			// manifest's declared new columns.
+			comparison := manifest
+			if fault != "success" {
+				comparison = Manifest{Migrations: before.Migrations}
+			}
+			require.NoError(t, CompareDatabase(before, after, comparison, false))
 			require.NoError(t, engine.billing(context.Background(), key))
 			verifyFixtureAdminSession(t, engine, adminToken)
 			var state UpgradeState
