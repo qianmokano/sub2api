@@ -168,7 +168,7 @@ func TestMigrationsRunner_UpgradeV0216PreservesPassportAndBusinessRows(t *testin
 		"api_keys":        "SELECT jsonb_agg(to_jsonb(t) ORDER BY id)::text FROM api_keys t",
 		"auth_identities": "SELECT jsonb_agg(to_jsonb(t) ORDER BY id)::text FROM auth_identities t",
 		"payment_orders":  "SELECT jsonb_agg(to_jsonb(t) ORDER BY id)::text FROM payment_orders t",
-		"groups":          "SELECT jsonb_agg(to_jsonb(t) - 'i18n' ORDER BY id)::text FROM groups t",
+		"groups":          "SELECT jsonb_agg(to_jsonb(t) - 'i18n' - 'image_count_billing' ORDER BY id)::text FROM groups t",
 		"settings":        "SELECT jsonb_agg(to_jsonb(t) ORDER BY id)::text FROM settings t",
 	}
 	before := map[string]string{}
