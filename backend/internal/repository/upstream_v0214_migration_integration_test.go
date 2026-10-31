@@ -168,7 +168,7 @@ func TestMigrationsRunner_UpgradeV0216PreservesPassportAndBusinessRows(t *testin
 		"api_keys":        "SELECT jsonb_agg(to_jsonb(t) ORDER BY id)::text FROM api_keys t",
 		"auth_identities": "SELECT jsonb_agg(to_jsonb(t) ORDER BY id)::text FROM auth_identities t",
 		"payment_orders":  "SELECT jsonb_agg(to_jsonb(t) ORDER BY id)::text FROM payment_orders t",
-		"groups":          "SELECT jsonb_agg(to_jsonb(t) - 'i18n' ORDER BY id)::text FROM groups t",
+		"groups":          "SELECT jsonb_agg(to_jsonb(t) - 'i18n' - 'image_count_billing' ORDER BY id)::text FROM groups t",
 		"settings":        "SELECT jsonb_agg(to_jsonb(t) ORDER BY id)::text FROM settings t",
 	}
 	before := map[string]string{}
@@ -200,6 +200,8 @@ func TestMigrationsRunner_UpgradeV0216PreservesPassportAndBusinessRows(t *testin
 	newMigrations := []string{
 		"242_drop_platform_check_constraints.sql", "242_group_i18n.sql", "243_gemini_cached_contents.sql",
 		"244_gemini_cached_contents_channel_usage.sql", "245_gemini_cached_contents_mutation_lease.sql",
+		"246_enable_gemini_image_generation_groups.sql", "247_scoped_admin_api_keys.sql",
+		"248_group_image_count_billing.sql",
 	}
 	var migrationCount int
 	require.NoError(t, db.QueryRowContext(ctx, "SELECT COUNT(*) FROM schema_migrations").Scan(&migrationCount))

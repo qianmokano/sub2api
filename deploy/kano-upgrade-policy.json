@@ -1,6 +1,17 @@
 {
   "minimum_source_version": "v0.2.16-1",
-  "added_columns": {},
-  "new_tables": {},
+  "added_columns": {
+    "groups": {
+      "image_count_billing": {
+        "type": "bool",
+        "nullable": false,
+        "default": "false",
+        "value": false
+      }
+    }
+  },
+  "new_tables": {
+    "scoped_admin_api_keys": 0
+  },
   "settings": {}
 }
