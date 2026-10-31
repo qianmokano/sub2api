@@ -245,6 +245,104 @@ func TestMigrationComparisonProtectsAllExistingFields(t *testing.T) {
 	require.Error(t, CompareDatabase(before, after, manifest, false))
 }
 
+func TestDeclaredChangedColumnsAllowOnlyReviewedValueRewrites(t *testing.T) {
+	before := originalDatabase()
+	groups := before.Tables["groups"]
+	groups.Changed = map[string]string{"i18n": "original-i18n"}
+	before.Tables["groups"] = groups
+
+	manifest := validManifest()
+	manifest.Validation.ChangedColumns = map[string]map[string]ChangedColumn{
+		"groups": {"i18n": {Reason: "246 rewrites a reviewed flag for existing groups"}},
+	}
+
+	after := copyDatabase(before)
+	rewritten := after.Tables["groups"]
+	rewritten.Changed["i18n"] = "rewritten-i18n"
+	after.Tables["groups"] = rewritten
+	require.NoError(t, CompareDatabase(before, after, manifest, false), "a declared rewrite must pass the upgrade comparison")
+	require.Error(t, validateRestoredDatabase(before, after), "an exact backup restore still compares the declared column")
+
+	undeclared := copyDatabase(before)
+	table := undeclared.Tables["groups"]
+	table.Digest = "changed unpinned row"
+	undeclared.Tables["groups"] = table
+	require.Error(t, CompareDatabase(before, undeclared, manifest, false), "other columns stay protected")
+
+	for name, run := range map[string]func() error{
+		"missing table": func() error {
+			broken := validManifest()
+			broken.Validation.ChangedColumns = map[string]map[string]ChangedColumn{"absent": {"i18n": {Reason: "x"}}}
+			return CompareDatabase(before, after, broken, false)
+		},
+		"missing column": func() error {
+			broken := validManifest()
+			broken.Validation.ChangedColumns = map[string]map[string]ChangedColumn{"groups": {"absent": {Reason: "x"}}}
+			return CompareDatabase(before, after, broken, false)
+		},
+		"added and changed": func() error {
+			broken := validManifest()
+			broken.Validation.AddedColumns = map[string]map[string]ColumnRule{"groups": {"i18n": {Type: "jsonb", Default: "'{}'::jsonb", Value: json.RawMessage(`{}`)}}}
+			broken.Validation.ChangedColumns = map[string]map[string]ChangedColumn{"groups": {"i18n": {Reason: "x"}}}
+			return CompareDatabase(before, after, broken, false)
+		},
+		"source snapshot without fingerprint": func() error {
+			plain := copyDatabase(before)
+			plainTable := plain.Tables["groups"]
+			plainTable.Changed = nil
+			plain.Tables["groups"] = plainTable
+			return CompareDatabase(plain, after, manifest, false)
+		},
+		"target snapshot without fingerprint": func() error {
+			plain := copyDatabase(after)
+			plainTable := plain.Tables["groups"]
+			plainTable.Changed = nil
+			plain.Tables["groups"] = plainTable
+			return CompareDatabase(before, plain, manifest, false)
+		},
+	} {
+		require.Error(t, run(), name)
+	}
+}
+
+func TestDatabaseSnapshotSkipsDeclaredChangedColumns(t *testing.T) {
+	queries := []string{}
+	runner := runnerFunc(func(_ context.Context, args []string, _ io.Reader, _ io.Writer) ([]byte, error) {
+		query := args[len(args)-1]
+		queries = append(queries, query)
+		switch {
+		case strings.Contains(query, "FROM pg_tables"):
+			return []byte(`["groups"]`), nil
+		case strings.Contains(query, "information_schema.columns"):
+			return []byte(`[{"name":"id","type":"int8","nullable":false,"default":""},{"name":"i18n","type":"jsonb","nullable":false,"default":"'{}'::jsonb"}]`), nil
+		case strings.Contains(query, "md5(row_to_json"):
+			return []byte("1|2|3"), nil
+		case strings.Contains(query, "md5(to_jsonb"):
+			return []byte("1|4|5"), nil
+		case strings.Contains(query, "jsonb_object_agg(filename"):
+			return []byte(`{"migration.sql":"checksum"}`), nil
+		case strings.Contains(query, "jsonb_object_agg(key"):
+			return []byte(`{}`), nil
+		default:
+			return []byte("0"), nil
+		}
+	})
+	engine := &Engine{Runner: runner}
+	container := Container{ID: "postgres"}
+	container.Config.Env = []string{"POSTGRES_USER=postgres", "POSTGRES_DB=sub2api"}
+	policy := ValidationPolicy{ChangedColumns: map[string]map[string]ChangedColumn{"groups": {"i18n": {Reason: "reviewed rewrite"}}}}
+	result, err := engine.database(context.Background(), container, nil, &policy)
+	require.NoError(t, err)
+	joined := strings.Join(queries, "\n")
+	require.Contains(t, joined, `SELECT "id" FROM public."groups"`, "the row fingerprint must skip the declared column")
+	require.Contains(t, joined, `to_jsonb("i18n")`, "the declared column keeps its own value fingerprint")
+	require.NotEmpty(t, result.Tables["groups"].Changed["i18n"])
+
+	excluded := ValidationPolicy{ChangedColumns: map[string]map[string]ChangedColumn{"groups": {"id": {Reason: "x"}, "i18n": {Reason: "x"}}}}
+	_, err = engine.database(context.Background(), container, nil, &excluded)
+	require.Error(t, err, "a policy that fingerprints no columns must be refused")
+}
+
 func TestDatabaseProjectionAndAddedValueCheck(t *testing.T) {
 	queries := []string{}
 	runner := runnerFunc(func(_ context.Context, args []string, _ io.Reader, _ io.Writer) ([]byte, error) {
@@ -269,7 +367,7 @@ func TestDatabaseProjectionAndAddedValueCheck(t *testing.T) {
 	container := Container{ID: "postgres"}
 	container.Config.Env = []string{"POSTGRES_USER=postgres", "POSTGRES_DB=sub2api"}
 	before := originalDatabase()
-	result, err := engine.database(context.Background(), container, &before)
+	result, err := engine.database(context.Background(), container, &before, nil)
 	require.NoError(t, err)
 	require.Equal(t, int64(1), result.Tables["groups"].Count)
 	require.True(t, strings.Contains(strings.Join(queries, "\n"), `SELECT "id","i18n" FROM public."groups"`))
@@ -289,7 +387,7 @@ func TestDatabaseProjectionAndAddedValueCheck(t *testing.T) {
 	engine.Runner = runnerFunc(func(context.Context, []string, io.Reader, io.Writer) ([]byte, error) {
 		return nil, errors.New("private error")
 	})
-	_, err = engine.database(context.Background(), container, nil)
+	_, err = engine.database(context.Background(), container, nil, nil)
 	require.Error(t, err)
 }
 
