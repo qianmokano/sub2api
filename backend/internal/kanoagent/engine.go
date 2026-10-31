@@ -186,7 +186,7 @@ func (e *Engine) Execute(ctx context.Context, store *Store, job *Job) (err error
 		return errors.New("application did not stop writing")
 	}
 	postgres := snapshot.Containers["postgres"]
-	snapshot.Database, err = e.database(ctx, postgres, nil)
+	snapshot.Database, err = e.database(ctx, postgres, nil, &job.Manifest.Validation)
 	if err != nil {
 		return err
 	}
@@ -290,7 +290,7 @@ func (e *Engine) Execute(ctx context.Context, store *Store, job *Job) (err error
 	if inspectErr != nil {
 		return inspectErr
 	}
-	after, databaseErr := e.database(ctx, currentPostgres, &snapshot.Database)
+	after, databaseErr := e.database(ctx, currentPostgres, &snapshot.Database, &job.Manifest.Validation)
 	if databaseErr != nil {
 		return databaseErr
 	}
@@ -586,7 +586,7 @@ func (e *Engine) isolatedRestore(ctx context.Context, state *UpgradeState, manif
 	if _, err = e.Runner.Run(ctx, args, file, nil); err != nil {
 		return err
 	}
-	restored, err := e.database(ctx, privatePostgres, nil)
+	restored, err := e.database(ctx, privatePostgres, nil, &manifest.Validation)
 	if err != nil {
 		return err
 	}
@@ -651,7 +651,7 @@ func (e *Engine) verifyPrivate(ctx context.Context, state *UpgradeState, manifes
 	if err != nil {
 		return err
 	}
-	after, err := e.database(ctx, postgres, &state.Snapshot.Database)
+	after, err := e.database(ctx, postgres, &state.Snapshot.Database, &manifest.Validation)
 	if err != nil {
 		return err
 	}

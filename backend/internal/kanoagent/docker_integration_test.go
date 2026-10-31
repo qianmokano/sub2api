@@ -410,6 +410,7 @@ func seedDockerData(t *testing.T, engine *Engine) (DatabaseSnapshot, string) {
 	key := "sk-" + strings.Repeat("u", 48)
 	query := `UPDATE users SET balance=123.456,concurrency=7 WHERE id=1;
 INSERT INTO groups(name,platform,subscription_type,status,rate_multiplier,i18n) VALUES ('fixture-group','openai','standard','active',1,'{"zh":{"name":"保留名称"}}');
+INSERT INTO groups(name,platform,subscription_type,status,rate_multiplier,i18n,allow_image_generation) VALUES ('fixture-gemini','gemini','standard','active',1,'{}',false);
 INSERT INTO api_keys(user_id,key,name,group_id,status) SELECT 1,'` + key + `','existing-key',id,'active' FROM groups WHERE name='fixture-group';
 INSERT INTO auth_identities(user_id,provider_type,provider_key,provider_subject,issuer,metadata) VALUES (1,'oidc','fixture-kano','existing-subject','https://auth.example.test','{"fixture":true}');
 INSERT INTO user_subscriptions(user_id,group_id,starts_at,expires_at,status,assigned_at,daily_usage_usd,weekly_usage_usd,monthly_usage_usd) SELECT 1,id,now(),now()+interval '30 days','active',now(),1.25,2.50,5.00 FROM groups WHERE name='fixture-group';
@@ -428,7 +429,8 @@ INSERT INTO settings(key,value) VALUES ('registration_enabled','false'),('defaul
 	require.NoError(t, err)
 	defer func() { _ = client1.Close() }()
 	require.NoError(t, client1.RPush(context.Background(), "preserved-list", "first", "second").Err())
-	before, err := engine.database(context.Background(), postgres, nil)
+	policy := integrationManifest(t).Validation
+	before, err := engine.database(context.Background(), postgres, nil, &policy)
 	require.NoError(t, err)
 	return before, key
 }
@@ -666,7 +668,7 @@ func TestKanoUpdaterDockerLifecycle(t *testing.T) {
 			}
 			postgres, err := engine.container(context.Background(), "postgres")
 			require.NoError(t, err)
-			after, err := engine.database(context.Background(), postgres, &before)
+			after, err := engine.database(context.Background(), postgres, &before, &manifest.Validation)
 			require.NoError(t, err)
 			for table, original := range before.Tables {
 				actual := after.Tables[table]
@@ -692,6 +694,14 @@ func TestKanoUpdaterDockerLifecycle(t *testing.T) {
 				require.DirExists(t, filepath.Join(state.BackupPath, "original"))
 			}
 			if fault == "success" {
+				// Migration 246 rewrites only the declared groups.allow_image_generation
+				// column for Gemini groups; other platforms must stay untouched.
+				geminiFlag, flagErr := engine.pg(context.Background(), postgres, "SELECT allow_image_generation FROM groups WHERE name='fixture-gemini'")
+				require.NoError(t, flagErr)
+				require.Equal(t, "t", geminiFlag)
+				openAIFlag, flagErr := engine.pg(context.Background(), postgres, "SELECT allow_image_generation FROM groups WHERE name='fixture-group'")
+				require.NoError(t, flagErr)
+				require.Equal(t, "f", openAIFlag)
 				_, err = engine.pg(context.Background(), postgres, "UPDATE users SET balance=456.789 WHERE id=1")
 				require.NoError(t, err)
 				stopDockerWorker(worker)
@@ -795,7 +805,8 @@ func TestKanoUpdaterDockerBrowser(t *testing.T) {
 				case <-time.After(100 * time.Millisecond):
 				}
 			}
-			captured, captureErr := engine.database(r.Context(), postgres, nil)
+			policy := integrationManifest(t).Validation
+			captured, captureErr := engine.database(r.Context(), postgres, nil, &policy)
 			if captureErr != nil {
 				w.WriteHeader(500)
 				return
@@ -884,7 +895,8 @@ func TestKanoUpdaterDockerBrowser(t *testing.T) {
 	audit, err := engine.pg(context.Background(), postgres, "SELECT COUNT(*) FROM audit_logs WHERE actor_user_id=1 AND method='POST' AND path='/api/v1/admin/system/update-schedule' AND status_code=202")
 	require.NoError(t, err)
 	require.Equal(t, "2", audit)
-	after, err := engine.database(context.Background(), postgres, &state.Snapshot.Database)
+	policy := integrationManifest(t).Validation
+	after, err := engine.database(context.Background(), postgres, &state.Snapshot.Database, &policy)
 	require.NoError(t, err)
 	require.NoError(t, CompareDatabase(state.Snapshot.Database, after, integrationManifest(t), false))
 	require.NoError(t, engine.billing(context.Background(), key))

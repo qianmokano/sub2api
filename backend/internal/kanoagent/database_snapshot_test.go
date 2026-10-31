@@ -55,7 +55,7 @@ func TestDatabaseSnapshotRejectsIncompleteOrInvalidEvidence(t *testing.T) {
 			})}
 			container := Container{ID: "postgres"}
 			container.Config.Env = []string{"POSTGRES_USER=postgres", "POSTGRES_DB=sub2api"}
-			_, err := engine.database(context.Background(), container, nil)
+			_, err := engine.database(context.Background(), container, nil, nil)
 			require.Error(t, err)
 		})
 	}

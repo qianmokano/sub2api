@@ -23,6 +23,10 @@ type TableSnapshot struct {
 	Columns []Column `json:"columns"`
 	Count   int64    `json:"count"`
 	Digest  string   `json:"digest"`
+	// Changed keeps a per-column value fingerprint for columns a reviewed
+	// migration is allowed to rewrite. The row fingerprint skips them, but an
+	// exact backup restore still compares these values.
+	Changed map[string]string `json:"changed,omitempty"`
 }
 
 type DatabaseSnapshot struct {
@@ -48,7 +52,7 @@ func (e *Engine) pg(ctx context.Context, container Container, query string) (str
 	return strings.TrimSpace(string(value)), err
 }
 
-func (e *Engine) database(ctx context.Context, container Container, projection *DatabaseSnapshot) (DatabaseSnapshot, error) {
+func (e *Engine) database(ctx context.Context, container Container, projection *DatabaseSnapshot, policy *ValidationPolicy) (DatabaseSnapshot, error) {
 	result := DatabaseSnapshot{Tables: map[string]TableSnapshot{}, Migrations: map[string]string{}, Settings: map[string]string{}}
 	value, err := e.pg(ctx, container, "SELECT COALESCE(jsonb_agg(tablename ORDER BY tablename),'[]'::jsonb) FROM pg_tables WHERE schemaname='public'")
 	if err != nil {
@@ -74,8 +78,20 @@ func (e *Engine) database(ctx context.Context, container Container, projection *
 			}
 		}
 		selection := make([]string, 0, len(selected))
+		changed := map[string]bool{}
+		if policy != nil {
+			for name := range policy.ChangedColumns[table] {
+				changed[name] = true
+			}
+		}
 		for _, column := range selected {
+			if changed[column.Name] {
+				continue
+			}
 			selection = append(selection, quoteIdentifier(column.Name))
+		}
+		if len(selection) == 0 {
+			return result, errors.New("changed column policy excludes every column of a table")
 		}
 		query := "SELECT COUNT(*),COALESCE(SUM(('x'||substr(h,1,16))::bit(64)::bigint::numeric),0),COALESCE(SUM(('x'||substr(h,17,16))::bit(64)::bigint::numeric),0) FROM (SELECT md5(row_to_json(t)::jsonb::text) AS h FROM (SELECT " + strings.Join(selection, ",") + " FROM public." + quoteIdentifier(table) + " OFFSET 0) t) rows"
 		value, err = e.pg(ctx, container, query)
@@ -91,7 +107,20 @@ func (e *Engine) database(ctx context.Context, container Container, projection *
 			return result, errors.New("invalid PostgreSQL row count")
 		}
 		digest := sha256.Sum256([]byte(value))
-		result.Tables[table] = TableSnapshot{Columns: columns, Count: count, Digest: hex.EncodeToString(digest[:])}
+		snapshot := TableSnapshot{Columns: columns, Count: count, Digest: hex.EncodeToString(digest[:])}
+		if len(changed) > 0 {
+			snapshot.Changed = map[string]string{}
+			for name := range changed {
+				columnQuery := "SELECT COUNT(*),COALESCE(SUM(('x'||substr(h,1,16))::bit(64)::bigint::numeric),0),COALESCE(SUM(('x'||substr(h,17,16))::bit(64)::bigint::numeric),0) FROM (SELECT md5(to_jsonb(" + quoteIdentifier(name) + ")::text) AS h FROM (SELECT " + quoteIdentifier(name) + " FROM public." + quoteIdentifier(table) + " OFFSET 0) t) rows"
+				columnValue, columnErr := e.pg(ctx, container, columnQuery)
+				if columnErr != nil {
+					return result, columnErr
+				}
+				columnDigest := sha256.Sum256([]byte(columnValue))
+				snapshot.Changed[name] = hex.EncodeToString(columnDigest[:])
+			}
+		}
+		result.Tables[table] = snapshot
 	}
 	value, err = e.pg(ctx, container, "SELECT COALESCE(jsonb_object_agg(filename,checksum),'{}'::jsonb) FROM schema_migrations")
 	if err != nil {
@@ -207,6 +236,30 @@ func CompareDatabase(before, after DatabaseSnapshot, manifest Manifest, private 
 	for table := range policy.NewTables {
 		if _, ok := after.Tables[table]; !ok {
 			return errors.New("a declared new table is missing")
+		}
+	}
+	for table, columns := range policy.ChangedColumns {
+		original, ok := before.Tables[table]
+		if !ok {
+			return errors.New("changed column policy refers to a missing original table")
+		}
+		existing := map[string]bool{}
+		for _, column := range original.Columns {
+			existing[column.Name] = true
+		}
+		for column := range columns {
+			if !existing[column] {
+				return errors.New("changed column policy refers to a missing original column")
+			}
+			if _, added := policy.AddedColumns[table][column]; added {
+				return errors.New("a column cannot be both added and changed")
+			}
+			if _, ok := original.Changed[column]; !ok {
+				return errors.New("changed column policy was not applied to the source snapshot")
+			}
+			if _, ok := after.Tables[table].Changed[column]; !ok {
+				return errors.New("changed column policy was not applied to the target snapshot")
+			}
 		}
 	}
 	for name, checksum := range before.Migrations {

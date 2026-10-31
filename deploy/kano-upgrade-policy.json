@@ -10,6 +10,13 @@
       }
     }
   },
+  "changed_columns": {
+    "groups": {
+      "allow_image_generation": {
+        "reason": "246 turns the flag on for existing Gemini/Antigravity groups; definition unchanged, only values reviewed"
+      }
+    }
+  },
   "new_tables": {
     "scoped_admin_api_keys": 0
   },

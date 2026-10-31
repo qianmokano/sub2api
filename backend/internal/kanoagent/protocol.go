@@ -7,6 +7,7 @@ import "github.com/Wei-Shaw/sub2api/internal/kanoupdate"
 type Manifest = kanoupdate.Manifest
 type ValidationPolicy = kanoupdate.ValidationPolicy
 type ColumnRule = kanoupdate.ColumnRule
+type ChangedColumn = kanoupdate.ChangedColumn
 type Release = kanoupdate.Release
 type ReleaseSource = kanoupdate.ReleaseSource
 type StartRequest = kanoupdate.StartRequest
