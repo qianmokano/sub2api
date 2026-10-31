@@ -42,6 +42,17 @@ func TestManifestValidationRejectsUnsafeUpdates(t *testing.T) {
 	for _, mutate := range []func(*Manifest){
 		func(m *Manifest) { m.SchemaVersion = 2 }, func(m *Manifest) { m.Version = "v0.2.16-kano.2" }, func(m *Manifest) { m.Image = "weishaw/sub2api:latest" }, func(m *Manifest) { m.ImageDigest = "bad" }, func(m *Manifest) { m.Revision = "bad" }, func(m *Manifest) { m.MinimumAgentVersion = "9.0.0" }, func(m *Manifest) { m.Validation.MinimumSourceVersion = "bad" }, func(m *Manifest) { m.Migrations = nil }, func(m *Manifest) { m.Migrations["../../run.sql"] = strings.Repeat("c", 64) }, func(m *Manifest) { m.Migrations["x.sql"] = "bad" }, func(m *Manifest) { m.Validation.Settings = map[string]string{"sso_enabled": "false"} }, func(m *Manifest) { m.Validation.Settings = map[string]string{"default_balance": "10"} }, func(m *Manifest) { m.Validation.NewTables = map[string]int64{"users;DELETE": 0} }, func(m *Manifest) { m.Validation.NewTables = map[string]int64{"new_table": -1} }, func(m *Manifest) { m.Validation.AddedColumns = map[string]map[string]ColumnRule{"groups": {}} }, func(m *Manifest) {
 			m.Validation.AddedColumns = map[string]map[string]ColumnRule{"groups": {"i18n": {Type: "jsonb", Value: json.RawMessage("bad")}}}
+		}, func(m *Manifest) {
+			m.Validation.ChangedColumns = map[string]map[string]ChangedColumn{"groups": {}}
+		}, func(m *Manifest) {
+			m.Validation.ChangedColumns = map[string]map[string]ChangedColumn{"groups;DELETE": {"i18n": {Reason: "reviewed"}}}
+		}, func(m *Manifest) {
+			m.Validation.ChangedColumns = map[string]map[string]ChangedColumn{"groups": {"i18n": {Reason: "   "}}}
+		}, func(m *Manifest) {
+			m.Validation.ChangedColumns = map[string]map[string]ChangedColumn{"groups": {"i18n": {Reason: strings.Repeat("r", 201)}}}
+		}, func(m *Manifest) {
+			m.Validation.AddedColumns = map[string]map[string]ColumnRule{"groups": {"i18n": {Type: "jsonb", Value: json.RawMessage(`{}`)}}}
+			m.Validation.ChangedColumns = map[string]map[string]ChangedColumn{"groups": {"i18n": {Reason: "reviewed"}}}
 		},
 	} {
 		m := validManifest()

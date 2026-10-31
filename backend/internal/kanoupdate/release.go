@@ -20,7 +20,7 @@ import (
 const (
 	Repository      = "qianmokano/sub2api"
 	ImageRepository = "ghcr.io/qianmokano/sub2api"
-	AgentVersion    = "1.1.0"
+	AgentVersion    = "1.2.0"
 	ManifestName    = "kano-update.json"
 	ProtocolVersion = 1
 )
@@ -83,14 +83,24 @@ type ColumnRule struct {
 	Value    json.RawMessage `json:"value"`
 }
 
+// ChangedColumn declares that a reviewed migration rewrites the values of an
+// existing column. The column definition must stay identical, the row
+// fingerprint for its table skips the declared column, and the migration text
+// itself stays pinned by its checksum. It carries no SQL, only the review note.
+type ChangedColumn struct {
+	Reason string `json:"reason"`
+}
+
 // ValidationPolicy is reviewed with the source change, not supplied by an admin.
-// v1 only permits new columns/tables and declared settings; old business values
-// and column types must remain intact. It cannot contain SQL or commands.
+// It only permits new columns/tables, declared settings and explicitly declared
+// value rewrites; old business values and column types must remain intact. It
+// cannot contain SQL or commands.
 type ValidationPolicy struct {
-	MinimumSourceVersion string                           `json:"minimum_source_version"`
-	AddedColumns         map[string]map[string]ColumnRule `json:"added_columns"`
-	NewTables            map[string]int64                 `json:"new_tables"`
-	Settings             map[string]string                `json:"settings"`
+	MinimumSourceVersion string                              `json:"minimum_source_version"`
+	AddedColumns         map[string]map[string]ColumnRule    `json:"added_columns"`
+	ChangedColumns       map[string]map[string]ChangedColumn `json:"changed_columns"`
+	NewTables            map[string]int64                    `json:"new_tables"`
+	Settings             map[string]string                   `json:"settings"`
 }
 
 type Manifest struct {
@@ -142,6 +152,20 @@ func (m Manifest) Validate() error {
 	for table, count := range m.Validation.NewTables {
 		if !identifierPattern.MatchString(table) || count < 0 {
 			return errors.New("invalid new table policy")
+		}
+	}
+	for table, columns := range m.Validation.ChangedColumns {
+		if !identifierPattern.MatchString(table) || len(columns) == 0 {
+			return errors.New("invalid changed column policy")
+		}
+		for column, rule := range columns {
+			reason := strings.TrimSpace(rule.Reason)
+			if !identifierPattern.MatchString(column) || reason == "" || len(reason) > 200 {
+				return errors.New("invalid changed column policy")
+			}
+			if _, added := m.Validation.AddedColumns[table][column]; added {
+				return errors.New("a column cannot be both added and changed")
+			}
 		}
 	}
 	for key := range m.Validation.Settings {
